@@ -67,7 +67,6 @@ The repository is organized as follows:
 Create a Conda environment compatible with [synthcity](https://github.com/vanderschaarlab/synthcity):
 
 ```bash
-cd HI-VAE
 conda create --name hivae python=3.12.9
 conda activate hivae
 pip install synthcity
