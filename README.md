@@ -3,7 +3,7 @@
 Code accompanying the paper *"Toward Valid Generative Clinical Trial Data with Survival Endpoints"*.  
 This repository provides tools to **generate and analyze synthetic clinical trial data with survival endpoints** using a generative modeling approach.
 
-It includes our extension of the **Heterogeneous Variational Autoencoder (HI-VAE)** supporting survival data, enabling the model to handle **time-to-event analysis** with incomplete and heterogeneous data types.  
+It includes our extension of the **Heterogeneous and Incomplete Variational Autoencoder (HI-VAE)** supporting survival data, enabling the model to handle **time-to-event analysis** with incomplete and heterogeneous data types.  
 The code is written in **Python** and uses **PyTorch**.
 
 ---
@@ -29,8 +29,6 @@ We used **phase III clinical trial datasets**:
 
 > **Important:** Real datasets are **not included** in this repository due to privacy restrictions. Users need to download them separately. Once downloaded, the **preprocessing scripts provided** can generate the required files (`data.csv`, `data_types.csv`, `Missingxx_y.csv`) for each real dataset.
 
----
-
 ### Simulated Datasets
 
 Simulated datasets are provided in the repository for demonstration and reproducibility purposes.  
@@ -52,9 +50,9 @@ Each dataset (real or simulated) should have its own folder and contain the foll
 
 The repository is organized as follows:
 
-* **execute/** – Scripts to **train, generate data, and optimize hyperparameters** for each model: `'surv-GAN'`, `'surv-VAE'`, `'HI-VAE_piecewise'`, `'HI-VAE_weibull'`.  
+* **execute/** – Scripts to **train, generate data, and optimize hyperparameters** for each model: `surv-GAN`, `surv-VAE`, `HI-VAE_piecewise`, `HI-VAE_weibull`.  
 * **preprocessing/*.ipynb** – Notebooks for **preprocessing real datasets**. Can generate required `data.csv`, `data_types.csv`, and `Missingxx_y.csv` files dor real datasets.  
-* **script/** – Scripts defining experiments (hyperparameter optimization, Monte Carlo experiments, type I error and power estimation).  
+* **script/** – Scripts defining experiments (hyperparameter optimization, Monte Carlo experiments, type I error and power estimation, etc.).  
 * **batch/** – Batch files to **run simulations and experiments** defined in the `script/` folder. Useful for automated or parallel execution on servers.
 * **tutorial/*.ipynb** – Tutorial notebooks demonstrating **how to run models and evaluate results**.  
 * **utils/** – Helper scripts, including:  
