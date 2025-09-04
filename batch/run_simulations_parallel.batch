@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --job-name=sim_exp_parallel
+#SBATCH --output=logs/sim_exp_%A_%a.out
+#SBATCH --error=logs/sim_exp_%A_%a.err
+#SBATCH --array=0-9  # one task per MC
+#SBATCH --cpus-per-task=4
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --gres=gpu:1
+#SBATCH --exclude=gpu012,gpu013,gpu015,gpu016,gpu017
+#SBATCH --partition=gpu
+
+echo "### Starting GPU job: $SLURM_JOB_NAME ###"
+cd ${SLURM_SUBMIT_DIR}
+
+module purge
+
+# Load your Python environment
+source /home/$USER/.bashrc
+source activate hivae  
+
+# Arguments
+MC_ID=${SLURM_ARRAY_TASK_ID}
+
+# python3 simulation_experiment_aug_traincontrol_parallel.py $MC_ID
+python3 ../script/simulation_experiment_traincontrol_parallel.py $MC_ID 
+# python3 simulation_experiment_trainfull_parallel.py $MC_ID
+# python3 simulation_experiment_aug_parallel.py $MC_ID

@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH --job-name=hyperopt_aug_traincontrol_parallel
+#SBATCH --output=logs/hyperopt_aug_traincontrol_%A_%a.out
+#SBATCH --error=logs/hyperopt_aug_traincontrol_%A_%a.err
+#SBATCH --array=0-1  # one task per generator
+#SBATCH --cpus-per-task=8
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --exclude=gpu012,gpu013,gpu015,gpu016,gpu017,gpu009
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:rtx8000:1
+
+echo "### Starting GPU job: $SLURM_JOB_NAME ###"
+cd ${SLURM_SUBMIT_DIR}
+
+module purge
+
+# Load your Python environment
+source /home/$USER/.bashrc 
+source activate hivae  
+
+# Arguments
+GENERATOR_ID=${SLURM_ARRAY_TASK_ID}
+
+cd ../script
+python3 simulation_hyperopt_aug_traincontrol_parallel.py $GENERATOR_ID 

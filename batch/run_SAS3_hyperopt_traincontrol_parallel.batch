@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH --job-name=sas3_hyperopt_traincontrol_parallel
+#SBATCH --output=logs/sas3_hyperopt_traincontrol_%A_%a.out
+#SBATCH --error=logs/sas3_hyperopt_traincontrol_%A_%a.err
+#SBATCH --array=0-5  # one task per generator
+#SBATCH --gres=gpu:rtx8000:1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+
+echo "### Starting GPU job: $SLURM_JOB_NAME ###"
+cd ${SLURM_SUBMIT_DIR}
+
+module purge
+
+# Load your Python environment
+source /home/$USER/.bashrc
+source activate .venv_HI_VAE_ext  
+
+# Arguments
+GENERATOR_ID=${SLURM_ARRAY_TASK_ID}
+
+python3 ../script/SAS3_hyperopt_traincontrol_parallel.py $GENERATOR_ID
