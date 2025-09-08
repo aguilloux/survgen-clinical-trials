@@ -1,0 +1,14 @@
+name,type,dim,nclass
+feat1,real,1,
+feat2,real,1,
+feat3,real,1,
+feat4,real,1,
+feat5,real,1,
+feat6,real,1,
+feat7,cat,1,2
+feat8,cat,1,2
+feat9,cat,1,2
+feat10,cat,1,2
+feat11,cat,1,2
+feat12,cat,1,2
+survcens,surv,2,
