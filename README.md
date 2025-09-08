@@ -77,6 +77,8 @@ pip install -r pip_requirements.txt
 
 ## License 
 
+No license has been selected yet for this repository. All rights are reserved.
+
 ---
 
 
