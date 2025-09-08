@@ -187,7 +187,7 @@ def run(dataset_name, generators_sel):
 
 if __name__ == "__main__":
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
-    dataset_sel = ["Aids", "SAS_1", "SAS_2", "SAS_3"]
+    dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
     dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]
     run(dataset_name , generators_sel)

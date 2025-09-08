@@ -81,6 +81,6 @@ def run(dataset_name):
   
 
 if __name__ == "__main__":
-    dataset_names = ["Aids", "SAS_1", "SAS_2", "SAS_3"]
+    dataset_names = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
     for dataset_name in dataset_names:
         run(dataset_name)
