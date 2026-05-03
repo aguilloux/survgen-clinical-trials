@@ -43,26 +43,31 @@ def compute_logrank_test(control, treat):
     )
     return -np.log(result.p_value)
 
-def log_rank(data_init, data_syn):
+def log_rank(data_init, data_syn, interest_var='treatment'):
     """
-    Evaluate the difference in survival distributions between treatment and control
-    groups for both initial and synthetic datasets using the log-rank test.
+    Evaluate the difference in survival distributions between two groups
+    defined by a binary covariate (`interest_var`), for both the initial
+    and the synthetic datasets, using the log-rank test.
 
     Args:
         data_init (DataFrame): Original dataset.
         data_syn (list of DataFrame): List of synthetic datasets.
+        interest_var (str): Name of the binary column used to split the
+            data into the two groups (values 0 and 1). Defaults to
+            'treatment'; any binary covariate present in the dataframes
+            can be passed.
 
     Returns:
         tuple: Log-rank test statistic for initial data and array of statistics for synthetic data.
     """
-    control_init = data_init[data_init['treatment'] == 0]
-    treat_init = data_init[data_init['treatment'] == 1]
+    control_init = data_init[data_init[interest_var] == 0]
+    treat_init = data_init[data_init[interest_var] == 1]
     logrank_init = compute_logrank_test(control_init, treat_init)
 
     logrank_syn = [
         compute_logrank_test(
-            data[data['treatment'] == 0],
-            data[data['treatment'] == 1]
+            data[data[interest_var] == 0],
+            data[data[interest_var] == 1]
         ) for data in data_syn
     ]
 
@@ -257,6 +262,95 @@ def general_metrics(data_init, data_gen, generator):
 
     score_df = pd.DataFrame(scores, columns=["J-S distance", "KS test", "Survival curves distance", 
                                              "Detection XGB", "NNDR", "K-map score"])
+    score_df["generator"] = generator
+
+    return score_df
+
+def general_metrics_modular(data_init, data_gen, generator, metrics = {
+        'sanity': ['nearest_syn_neighbor_distance'],
+        'stats': ['jensenshannon_dist', 'ks_test', 'survival_km_distance'],
+        'performance': ['feat_rank_distance'],
+        'detection': ['detection_xgb'],
+        'privacy': ['k-map', 'distinct l-diversity', 'identifiability_score']
+    }):
+    """
+    Compute a configurable set of quality metrics to assess synthetic survival data.
+
+    Unlike general_metrics, this function accepts a custom metrics dict, allowing
+    callers to select which synthcity metric groups and sub-metrics to evaluate.
+    Only metrics present in the expected_metrics mapping are included in the output;
+    any requested metric not found in the evaluation result is silently skipped.
+
+    Args:
+        data_init (DataFrame): Initial real-world dataset.
+        data_gen (list of DataFrame): List of generated synthetic datasets.
+        generator (str): Name of the synthetic data generator.
+        metrics (dict, optional): Dictionary mapping synthcity metric categories to
+            lists of metric names to compute. Defaults to a standard set covering
+            stats, detection, sanity, and privacy metrics.
+
+    Returns:
+        DataFrame: Summary of metric scores for each synthetic dataset, with one
+            column per matched metric and a 'generator' column.
+    """
+
+    synthcity_dataloader_init = SurvivalAnalysisDataLoader(data_init, target_column = "censor", time_to_event_column = "time")
+
+    # Map synthcity output keys to human-readable column names
+    expected_metrics = {
+        "stats.jensenshannon_dist.marginal": "J-S distance",
+        "stats.ks_test.marginal": "KS test",
+        "stats.survival_km_distance.abs_optimism": "Survival curves distance",
+        "detection.detection_xgb.mean": "Detection XGB",
+        "sanity.nearest_syn_neighbor_distance.mean": "NNDR",
+        "privacy.k-map.score": "K-map score"
+    }
+
+    scores = []
+    for idx, generated_data in enumerate(data_gen):
+        enable_reproducible_results(idx)
+        clear_cache()
+
+        synthcity_dataloader_syn = SurvivalAnalysisDataLoader(generated_data, target_column = "censor", time_to_event_column = "time")
+
+        # evaluation = Metrics().evaluate(X_gt=synthcity_dataloader_init, # can be dataloaders or dataframes
+        #                                 X_syn=synthcity_dataloader_syn, 
+        #                                 reduction='mean', # default mean
+        #                                 n_histogram_bins=10, # default 10
+        #                                 metrics=None, # all metrics
+        #                                 task_type='survival_analysis', 
+        #                                 use_cache=True)
+        
+        evaluation = Metrics().evaluate(X_gt=synthcity_dataloader_init, # can be dataloaders or dataframes
+                                        X_syn=synthcity_dataloader_syn, 
+                                        reduction='mean', # default mean
+                                        n_histogram_bins=10, # default 10
+                                        metrics=metrics, # compute only selected metrics
+                                        task_type='survival_analysis', 
+                                        # n_folds=1,
+                                        use_cache=True)
+        
+        # selected_metrics = evaluation.T[["stats.jensenshannon_dist.marginal",
+        #                                   "stats.ks_test.marginal", 
+        #                                   "stats.survival_km_distance.abs_optimism",
+        #                                   "detection.detection_xgb.mean", 
+        #                                   "sanity.nearest_syn_neighbor_distance.mean", 
+        #                                   "privacy.k-map.score"]].T["mean"].values
+        # scores.append(selected_metrics)
+        # print("selected_metrics: ", selected_metrics)
+
+        # Safely retrieve all selected metrics
+        values = []
+        name_columns = []
+        for metric in expected_metrics:
+            if metric in evaluation.T.columns:
+                val = evaluation.T[[metric]].T["mean"].values[0]
+                values.append(val)
+                name_columns.append(expected_metrics[metric])
+        # print("values: ", values)
+        scores.append(values)
+
+    score_df = pd.DataFrame(scores, columns=name_columns)
     score_df["generator"] = generator
 
     return score_df

@@ -27,11 +27,34 @@ def set_seed(seed=1):
     torch.backends.cudnn.benchmark = False
     torch.use_deterministic_algorithms(True)
 
-class HIVAE(nn.Module):
-    def __init__(self, input_dim, z_dim, s_dim, y_dim, y_dim_partition=[], feat_types_dict=[], intervals_surv_piecewise=None, n_layers_surv_piecewise=2):
-        
+class _SurvPiecewiseDict(nn.Module):
+    """Wraps piecewise-survival sub-layers so they are properly registered as
+    submodules, while also carrying the (non-learnable) interval boundaries."""
+    def __init__(self, theta_T, theta_C, intervals):
         super().__init__()
-        set_seed()
+        self.theta_T = theta_T
+        self.theta_C = theta_C
+        self.intervals = intervals  # plain list, not a learnable param
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+
+class HIVAE(nn.Module):
+    # Builds the encoder / decoder layers for a heterogeneous-incomplete VAE.
+    # `self.theta_layer` is an `nn.ModuleDict` whose entries are themselves
+    # `nn.ModuleDict` (or, for piecewise-survival features, the
+    # `_SurvPiecewiseDict` helper) so that all sub-Linears are registered
+    # as submodules and picked up by `vae_model.parameters()`.
+    # `self.surv_normalization_globals` holds the (data_min, data_max) used
+    # to scale survival times consistently across all batches; it is set by
+    # the train_HIVAE* functions on the full training set before training,
+    # and remains None for inference paths that don't need it.
+    # Seeding is left to the caller (run / run_alt) — no global seed is set
+    # in the constructor.
+    def __init__(self, input_dim, z_dim, s_dim, y_dim, y_dim_partition=[], feat_types_dict=[], intervals_surv_piecewise=None, n_layers_surv_piecewise=2):
+
+        super().__init__()
         self.feat_types_list = feat_types_dict
 
         # Determine Y dimensionality
@@ -44,6 +67,7 @@ class HIVAE(nn.Module):
         self.z_dim = z_dim
         self.s_dim = s_dim
         self.y_dim = sum(self.y_dim_partition)
+        self.surv_normalization_globals = None # populated later by train_HIVAE
 
         # for encoder
         self.s_layer = nn.Linear(input_dim, s_dim)  # q(s|x^o)
@@ -53,63 +77,76 @@ class HIVAE(nn.Module):
         self.z_distribution_layer = nn.Linear(s_dim, z_dim)  # p(z|s)
         self.y_layer = nn.Linear(z_dim, self.y_dim)  # y deterministic layer
         
-        self.theta_layer = {}
+        self.theta_layer = nn.ModuleDict()
         for i, feat in enumerate(self.feat_types_list):
-            
+
             feat_y_dim = self.y_dim_partition[i]
-            
+
             if feat['type'] in ['real', 'pos']:
-                self.theta_layer["feat_" + str(i)] = {'mean' : nn.Linear(feat_y_dim + s_dim, 1, bias=False),
-                                                      'sigma' : nn.Linear(s_dim, 1, bias=False)}
+                self.theta_layer["feat_" + str(i)] = nn.ModuleDict({
+                    'mean' : nn.Linear(feat_y_dim + s_dim, 1, bias=False),
+                    'sigma' : nn.Linear(s_dim, 1, bias=False)
+                })
             elif feat['type'] in ['surv']:
-                self.theta_layer["feat_" + str(i)] = {'mean_T' : nn.Linear(feat_y_dim + s_dim, 1, bias=False),
-                                                      'sigma_T' : nn.Linear(s_dim, 1, bias=False),
-                                                      'mean_C' : nn.Linear(feat_y_dim + s_dim, 1, bias=False),
-                                                      'sigma_C' : nn.Linear(s_dim, 1, bias=False)}
-
+                self.theta_layer["feat_" + str(i)] = nn.ModuleDict({
+                    'mean_T' : nn.Linear(feat_y_dim + s_dim, 1, bias=False),
+                    'sigma_T' : nn.Linear(s_dim, 1, bias=False),
+                    'mean_C' : nn.Linear(feat_y_dim + s_dim, 1, bias=False),
+                    'sigma_C' : nn.Linear(s_dim, 1, bias=False)
+                })
             elif feat['type'] in ['surv_weibull','surv_loglog']:
-                self.theta_layer["feat_" + str(i)] = {'theta' : nn.Linear(feat_y_dim + s_dim, 4, bias=False)}
-
+                self.theta_layer["feat_" + str(i)] = nn.ModuleDict({
+                    'theta' : nn.Linear(feat_y_dim + s_dim, 4, bias=False)
+                })
             elif feat['type'] in ['surv_piecewise']:
                 n_intervals = len(intervals_surv_piecewise)
                 if n_layers_surv_piecewise == 2:
-                    self.theta_layer["feat_" + str(i)] = {'theta_T' :   nn.Sequential(
-                                                                        nn.Linear(feat_y_dim + s_dim, out_features=20, bias=False),
-                                                                        nn.ReLU(),
-                                                                        nn.Linear(in_features=20, out_features=n_intervals, bias=False)
-                                                                        ),
-                                                        'theta_C' :   nn.Sequential(
-                                                                        nn.Linear(feat_y_dim + s_dim, out_features=20, bias=False),
-                                                                        nn.ReLU(),
-                                                                        nn.Linear(in_features=20, out_features=n_intervals, bias=False)
-                                                                        ),
-                                                        'intervals' : intervals_surv_piecewise}
+                    self.theta_layer["feat_" + str(i)] = _SurvPiecewiseDict(
+                        theta_T=nn.Sequential(
+                            nn.Linear(feat_y_dim + s_dim, out_features=20, bias=False),
+                            nn.ReLU(),
+                            nn.Linear(in_features=20, out_features=n_intervals, bias=False)
+                        ),
+                        theta_C=nn.Sequential(
+                            nn.Linear(feat_y_dim + s_dim, out_features=20, bias=False),
+                            nn.ReLU(),
+                            nn.Linear(in_features=20, out_features=n_intervals, bias=False)
+                        ),
+                        intervals=intervals_surv_piecewise
+                    )
                 else:
-                    self.theta_layer["feat_" + str(i)] = {'theta_T' : nn.Linear(feat_y_dim + s_dim, n_intervals, bias=False),
-                                                        'theta_C' : nn.Linear(feat_y_dim + s_dim, n_intervals, bias=False),
-                                                        'intervals' : intervals_surv_piecewise}
-
-
+                    self.theta_layer["feat_" + str(i)] = _SurvPiecewiseDict(
+                        theta_T=nn.Linear(feat_y_dim + s_dim, n_intervals, bias=False),
+                        theta_C=nn.Linear(feat_y_dim + s_dim, n_intervals, bias=False),
+                        intervals=intervals_surv_piecewise
+                    )
             elif feat['type'] in ['count']:
                 self.theta_layer["feat_" + str(i)] = nn.Linear(feat_y_dim + s_dim, 1, bias=False)
-
             elif feat['type'] in ['cat']:
                 n_class = int(feat['nclass'])
                 self.theta_layer["feat_" + str(i)] = nn.Linear(feat_y_dim + s_dim, n_class - 1, bias=False)
-
             else: # ordinal
                 n_class = int(feat['nclass'])
-                self.theta_layer["feat_" + str(i)] = {'theta' : nn.Linear(s_dim, n_class - 1, bias=False),
-                                                      'mean' : nn.Linear(feat_y_dim + s_dim, 1, bias=False)}
+                self.theta_layer["feat_" + str(i)] = nn.ModuleDict({
+                    'theta' : nn.Linear(s_dim, n_class - 1, bias=False),
+                    'mean' : nn.Linear(feat_y_dim + s_dim, 1, bias=False)
+                })
 
 
     def forward(self, batch_data_oberved, batch_data, batch_miss, tau=1.0, n_generated_dataset=1):
-        """ 
-        Forward pass through the encoder and decoder 
+        """
+        Forward pass through the encoder and decoder.
+
+        Survival-time features are normalized using the (data_min, data_max)
+        pair stored in `self.surv_normalization_globals` when it has been set
+        (typically by the train_HIVAE* functions, which freeze it on the full
+        training set before training starts). When it is None,
+        batch_normalization computes per-batch min/max instead.
         """
         
         # Batch normalization 
-        X_list, normalization_params = data_processing.batch_normalization(batch_data_oberved, self.feat_types_list, batch_miss)
+        X_list, normalization_params = data_processing.batch_normalization(batch_data_oberved, self.feat_types_list, batch_miss,
+                                                                           surv_globals=self.surv_normalization_globals)
         
         # Encode
         X = torch.cat(X_list, dim=1) 
@@ -215,13 +252,15 @@ class HIVAE(nn.Module):
             KL divergence for z.
         
         KL_s : torch.Tensor
-            KL divergence for s.
+            KL divergence for s. Per-sample (shape [batch]); the batch mean
+            is taken when assembling the ELBO, so cross_entropy is called
+            with reduction='none' here.
         """
 
         # KL(q(s|x) || p(s))
         log_pi = q_params['s']
         pi_param = F.softmax(log_pi, dim=-1)
-        KL_s = -F.cross_entropy(log_pi, pi_param, reduction='mean') + torch.log(torch.tensor(float(self.s_dim)))
+        KL_s = -F.cross_entropy(log_pi, pi_param, reduction='none') + torch.log(torch.tensor(float(self.s_dim)))
 
         # KL(q(z|s,x) || p(z|s))
         mean_pz, log_var_pz = p_params['z']

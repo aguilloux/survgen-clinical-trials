@@ -255,7 +255,7 @@ def load_data_types(types_file):
         return [{k: v for k, v in row.items()} for row in csv.DictReader(f, skipinitialspace=True)]
 
 
-def batch_normalization(batch_data_list, feat_types_list, miss_list):
+def batch_normalization(batch_data_list, feat_types_list, miss_list, surv_globals):
     """
     Normalizes real-valued data while leaving categorical/ordinal variables unchanged.
 
@@ -263,18 +263,27 @@ def batch_normalization(batch_data_list, feat_types_list, miss_list):
     -----------
     batch_data_list : list of torch.Tensor
         List of input data tensors, each corresponding to a feature.
-    
+
     feat_types_list : list of dict
         List specifying the type of each feature.
-    
+
     miss_list : torch.Tensor
         Binary mask indicating observed (1) and missing (0) values.
+
+    surv_globals : tuple(float, float) or None
+        Pre-computed (data_min, data_max) for survival-time features
+        (surv_weibull / surv_loglog / surv_piecewise). When provided, the
+        same scale is used for every batch — typically frozen once on the
+        full training set by the caller (train_HIVAE*). When None, the
+        function falls back to per-batch min/max. The scaling for these
+        survival types is `observed_data / data_max` (no min subtraction),
+        so hazard-based likelihoods see times measured from the origin.
 
     Returns:
     --------
     normalized_data : list of torch.Tensor
         List of normalized feature tensors.
-    
+
     normalization_parameters : list of tuples
         Normalization parameters for each feature.
     """
@@ -336,13 +345,16 @@ def batch_normalization(batch_data_list, feat_types_list, miss_list):
             normalization_parameters.append((data_mean_log, data_var_log))
 
         elif feature_type in ('surv_weibull','surv_loglog', 'surv_piecewise'):
-            # Min max normalization
-            data_min = torch.min(observed_data[:, 0]) - 1e-3
-            data_max = torch.max(observed_data[:, 0])
+            # normalization
+            if surv_globals is not None:
+                data_min, data_max = surv_globals
+            else:
+                data_min = torch.min(observed_data[:, 0]) - 1e-3
+                data_max = torch.max(observed_data[:, 0])
+
             normalization_parameters.append((data_min, data_max))
-            
-            
-            normalized_observed =  (observed_data - data_min) / (data_max - data_min)
+
+            normalized_observed =  observed_data / data_max
             normalized_d = torch.zeros_like(d)
             normalized_d[~missing_mask] = normalized_observed  # Assign transformed values
             normalized_d[missing_mask] = 0  # Missing values set to 0

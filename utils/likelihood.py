@@ -455,7 +455,12 @@ def loglik_surv_weibull(batch_data, list_type, theta, normalization_params, n_ge
         - est_shape_T, est_scale_T, est_shape_C, est_scale_C
 
     normalization_params : tuple of (torch.Tensor, torch.Tensor)
-        - data_min, data_max
+        - data_min, data_max. Only data_max is used here, to rescale
+          survival times to [0, 1] via `T / data_max`. data_min is kept
+          in the tuple for consistency with other likelihoods but is not
+          used — Weibull hazards assume t starts at the origin. The
+          reverse-transform on sampled times is purely multiplicative:
+          `sample * data_max`.
 
     n_generated_dataset : int
         Number of samples to be generated per an input data point
@@ -466,7 +471,9 @@ def loglik_surv_weibull(batch_data, list_type, theta, normalization_params, n_ge
         - `params`: Estimated mean and variance.
         - `log_p_x`: Log-likelihood of observed data.
         - `log_p_x_missing`: Log-likelihood of missing data.
-        - `samples`: Sampled values from the estimated log-normal distribution.
+        - `samples`: Sampled (T, C) values from the estimated Weibull
+          distributions. Sampled times are not clamped to the empirical
+          max so that the tail of the censoring distribution is preserved.
     """
     min_shape = 1e-3
     min_scale = 1e-3
@@ -494,7 +501,7 @@ def loglik_surv_weibull(batch_data, list_type, theta, normalization_params, n_ge
 
     # Compute log-likelihood
     T_surv, delta = data[:, 0], data[:, 1]
-    T_surv_scaled = (T_surv - data_min) / (data_max - data_min)
+    T_surv_scaled = T_surv / data_max
     log_p_x_T = delta * weibull.log_hazard(torch.stack([log_est_scale_T, log_est_shape_T]).T, T_surv_scaled, all_times=False) - weibull.cumulative_hazard(torch.stack([log_est_scale_T, log_est_shape_T]).T, T_surv_scaled, all_times=False)
     log_p_x_C = (1 - delta) * weibull.log_hazard(torch.stack([log_est_scale_C, log_est_shape_C]).T, T_surv_scaled, all_times=False) - weibull.cumulative_hazard(torch.stack([log_est_scale_C, log_est_shape_C]).T, T_surv_scaled, all_times=False)
 
@@ -504,15 +511,15 @@ def loglik_surv_weibull(batch_data, list_type, theta, normalization_params, n_ge
     for _ in range(n_generated_dataset):
         U = torch.rand(T_surv.shape[0]).clamp(1e-6, 1)  # Avoid log(0)
         V = torch.rand(T_surv.shape[0]).clamp(1e-6, 1)  # Avoid log(0)
-        T_sampled = est_scale_T * (-torch.log(U)) ** (1 / est_shape_T) * (data_max - data_min) / 1.0  + data_min
-        C_sampled = est_scale_C * (-torch.log(V)) ** (1 / est_shape_C) * (data_max - data_min) / 1.0  + data_min
+        T_sampled = est_scale_T * (-torch.log(U)) ** (1 / est_shape_T) * data_max
+        C_sampled = est_scale_C * (-torch.log(V)) ** (1 / est_shape_C) * data_max
         sample_T.append(T_sampled)
         sample_C.append(C_sampled)
 
     max_threshold =  max(T_surv).item()
     # max_threshold = 1e20
     sample_T = torch.stack(sample_T, dim=0)#.clamp(0, max_threshold)
-    sample_C = torch.stack(sample_C, dim=0).clamp(0, max_threshold)
+    sample_C = torch.stack(sample_C, dim=0)#.clamp(0, max_threshold)
 
     return {
         "params": [est_shape_T, est_scale_T, est_shape_C, est_scale_C],
