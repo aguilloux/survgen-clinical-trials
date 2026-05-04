@@ -423,7 +423,7 @@ def loglik_surv_piecewise(batch_data, list_type, theta, normalization_params, n_
     for _ in range(n_generated_dataset):
         T_s = sample_from_density(density_T, intervals, data_min, data_max)
         C_s = sample_from_density(density_C, intervals, data_min, data_max)
-        mask = (T_s > data_max) & (C_s > data_max)
+        mask = (C_s > data_max)
         C_s[mask] = data_max
 
         sample_T.append(T_s)
@@ -516,10 +516,9 @@ def loglik_surv_weibull(batch_data, list_type, theta, normalization_params, n_ge
         sample_T.append(T_sampled)
         sample_C.append(C_sampled)
 
-    max_threshold =  max(T_surv).item()
     # max_threshold = 1e20
-    sample_T = torch.stack(sample_T, dim=0)#.clamp(0, max_threshold)
-    sample_C = torch.stack(sample_C, dim=0)#.clamp(0, max_threshold)
+    sample_T = torch.stack(sample_T, dim=0)#.clamp(0, data_max)
+    sample_C = torch.stack(sample_C, dim=0).clamp(0, data_max)
 
     return {
         "params": [est_shape_T, est_scale_T, est_shape_C, est_scale_C],
