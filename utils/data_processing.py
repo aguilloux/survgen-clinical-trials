@@ -255,110 +255,197 @@ def load_data_types(types_file):
         return [{k: v for k, v in row.items()} for row in csv.DictReader(f, skipinitialspace=True)]
 
 
-def batch_normalization(batch_data_list, feat_types_list, miss_list, surv_globals):
+def compute_feat_normalization_globals(data, feat_types_list, miss_mask):
     """
-    Normalizes real-valued data while leaving categorical/ordinal variables unchanged.
+    Computes frozen normalization statistics on the full (training) set,
+    one entry per feature, matching the order of feat_types_list. Call
+    once before training (after combining miss_mask with true_miss_mask)
+    and assign the result to vae_model.feat_normalization_globals so the
+    same scale is used by every forward pass during training, validation
+    and generation.
 
-    Parameters:
-    -----------
+    Returned list elements:
+      - 'real'             : (mean, var)          on observed values
+      - 'pos'              : (log_mean, log_var)  on log1p(observed values)
+      - 'surv'             : (log_mean, log_var)  on log1p(observed time column)
+      - 'surv_weibull',
+        'surv_loglog',
+        'surv_piecewise'   : (data_min, data_max) on observed time column,
+                             with data_min = observed_min - 1e-3
+      - 'count', 'cat',
+        'ordinal'          : None (no statistics needed)
+
+    Parameters
+    ----------
+    data : torch.Tensor
+        Full data tensor of shape (N, sum(feature_dims)). Typically the
+        training-set slice.
+    feat_types_list : list of dict
+        Feature descriptors as used throughout the model.
+    miss_mask : torch.Tensor
+        Mask of shape (N, n_features) with 1 = observed, 0 = missing.
+        Pass the already-combined (miss_mask × true_miss_mask) tensor.
+    """
+    n = data.shape[0]
+    data_list, miss_list = next_batch(data, feat_types_list, miss_mask, n, 0)
+
+    globals_list = []
+    for i, feat in enumerate(feat_types_list):
+        observed_mask = miss_list[:, i] == 1
+        d = data_list[i]
+        feature_type = feat['type']
+
+        if feature_type == 'real':
+            obs = d[observed_mask]
+            data_var, data_mean = torch.var_mean(obs, unbiased=False)
+            data_var = torch.clamp(data_var, min=1e-6, max=1e20)
+            globals_list.append((data_mean.item(), data_var.item()))
+
+        elif feature_type == 'pos':
+            obs_log = torch.log1p(d[observed_mask])
+            data_var_log, data_mean_log = torch.var_mean(obs_log, unbiased=False)
+            data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
+            globals_list.append((data_mean_log.item(), data_var_log.item()))
+
+        elif feature_type == 'surv':
+            time_obs_log = torch.log1p(d[observed_mask, 0])
+            data_var_log, data_mean_log = torch.var_mean(time_obs_log, unbiased=False)
+            data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
+            globals_list.append((data_mean_log.item(), data_var_log.item()))
+
+        elif feature_type in ('surv_weibull', 'surv_loglog', 'surv_piecewise'):
+            time_obs = d[observed_mask, 0]
+            data_min = time_obs.min().item() - 1e-3
+            data_max = time_obs.max().item()
+            globals_list.append((data_min, data_max))
+
+        else:
+            # count, cat, ordinal — no statistics needed
+            globals_list.append(None)
+
+    return globals_list
+
+
+def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normalization_globals=None):
+    """
+    Normalizes input features for the encoder, using frozen training-set
+    statistics when `feat_normalization_globals` is provided.
+
+    This is *not* nn.BatchNorm. It performs type-aware feature
+    standardization on input data (z-score for real / pos / legacy surv,
+    min-max scaling for the parametric survival families, log-transform
+    for count, pass-through for cat / ordinal). When the frozen-globals
+    argument is provided, statistics are NOT recomputed from the current
+    batch — this both prevents train/inference scale drift and avoids the
+    per-sample-gradient coupling that would otherwise invalidate any
+    differentially-private training.
+
+    Parameters
+    ----------
     batch_data_list : list of torch.Tensor
         List of input data tensors, each corresponding to a feature.
-
     feat_types_list : list of dict
         List specifying the type of each feature.
-
     miss_list : torch.Tensor
         Binary mask indicating observed (1) and missing (0) values.
+    feat_normalization_globals : list or None
+        Per-feature frozen statistics produced by
+        compute_feat_normalization_globals (one entry per feature, or
+        None for types that need no stats). When this argument itself is
+        None, the function falls back to per-batch statistics. The
+        fallback exists only for pre-training / diagnostic forward passes
+        — trained models (and especially DP-trained models) should always
+        pass the frozen globals.
 
-    surv_globals : tuple(float, float) or None
-        Pre-computed (data_min, data_max) for survival-time features
-        (surv_weibull / surv_loglog / surv_piecewise). When provided, the
-        same scale is used for every batch — typically frozen once on the
-        full training set by the caller (train_HIVAE*). When None, the
-        function falls back to per-batch min/max. The scaling for these
-        survival types is `observed_data / data_max` (no min subtraction),
-        so hazard-based likelihoods see times measured from the origin.
-
-    Returns:
-    --------
+    Returns
+    -------
     normalized_data : list of torch.Tensor
         List of normalized feature tensors.
-
     normalization_parameters : list of tuples
-        Normalization parameters for each feature.
+        Per-feature normalization parameters used by the decoder
+        likelihood to un-normalize predictions.
     """
 
     normalized_data = []
     normalization_parameters = []
 
     for i, d in enumerate(batch_data_list):
-        missing_mask = miss_list[:, i] == 0  # True for missing values, False for observed values
-        observed_data = d[~missing_mask]  # Extract observed values
+        observed_mask = miss_list[:, i] == 1
+        missing_mask = ~observed_mask
+        observed_data = d[observed_mask]
 
         feature_type = feat_types_list[i]['type']
+        feat_globals = (
+            feat_normalization_globals[i]
+            if feat_normalization_globals is not None
+            else None
+        )
 
         if feature_type == 'real':
-            # Standard normalization (mean 0, std 1)
-            data_var, data_mean = torch.var_mean(observed_data, unbiased=False)
-            data_var = torch.clamp(data_var, min=1e-6, max=1e20)  # Prevent division by zero
-            
-            normalized_observed = (observed_data - data_mean) / torch.sqrt(data_var)
+            if feat_globals is not None:
+                data_mean, data_var = feat_globals
+            else:
+                data_var, data_mean = torch.var_mean(observed_data, unbiased=False)
+                data_var = torch.clamp(data_var, min=1e-6, max=1e20)
+
+            normalized_observed = (observed_data - data_mean) / torch.sqrt(torch.as_tensor(data_var, dtype=observed_data.dtype))
             normalized_d = torch.zeros_like(d)
-            normalized_d[~missing_mask] = normalized_observed  # Assign transformed values
-            normalized_d[missing_mask] = 0  # Missing values set to 0
-            
+            normalized_d[observed_mask] = normalized_observed
+            normalized_d[missing_mask] = 0
+
             normalization_parameters.append((data_mean, data_var))
 
         elif feature_type == 'pos':
-            # Log-normal transformation and normalization
             observed_data_log = torch.log1p(observed_data)
-            data_var_log, data_mean_log = torch.var_mean(observed_data_log, unbiased=False)
-            data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
+            if feat_globals is not None:
+                data_mean_log, data_var_log = feat_globals
+            else:
+                data_var_log, data_mean_log = torch.var_mean(observed_data_log, unbiased=False)
+                data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
 
-            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(data_var_log)
+            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(torch.as_tensor(data_var_log, dtype=observed_data_log.dtype))
             normalized_d = torch.zeros_like(d)
-            normalized_d[~missing_mask] = normalized_observed
+            normalized_d[observed_mask] = normalized_observed
             normalized_d[missing_mask] = 0
 
             normalization_parameters.append((data_mean_log, data_var_log))
 
         elif feature_type == 'count':
-            # Log transformation (No variance normalization)
             normalized_d = torch.zeros_like(d)
-            normalized_d[~missing_mask] = torch.log1p(observed_data)  # Log-transform observed values
-            normalized_d[missing_mask] = 0  # Missing values set to 0
-            
+            normalized_d[observed_mask] = torch.log1p(observed_data)
+            normalized_d[missing_mask] = 0
+
             normalization_parameters.append((0.0, 1.0))
 
         elif feature_type == 'surv':
-            # Log transformation (No variance normalization)
             observed_data_log = torch.log1p(observed_data[:, 0])
-            data_var_log, data_mean_log = torch.var_mean(observed_data_log, unbiased=False)
-            data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
+            if feat_globals is not None:
+                data_mean_log, data_var_log = feat_globals
+            else:
+                data_var_log, data_mean_log = torch.var_mean(observed_data_log, unbiased=False)
+                data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
 
-            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(data_var_log)
+            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(torch.as_tensor(data_var_log, dtype=observed_data_log.dtype))
             normalized_d = torch.zeros_like(d)
-            normalized_d[~missing_mask][:, 0] = normalized_observed
-            normalized_d[~missing_mask][:, 1] = observed_data[:, 1]
+            normalized_d[observed_mask, 0] = normalized_observed
+            normalized_d[observed_mask, 1] = observed_data[:, 1]
             normalized_d[missing_mask] = 0
 
             normalization_parameters.append((data_mean_log, data_var_log))
 
-        elif feature_type in ('surv_weibull','surv_loglog', 'surv_piecewise'):
-            # normalization
-            if surv_globals is not None:
-                data_min, data_max = surv_globals
+        elif feature_type in ('surv_weibull', 'surv_loglog', 'surv_piecewise'):
+            if feat_globals is not None:
+                data_min, data_max = feat_globals
             else:
-                data_min = torch.min(observed_data[:, 0]) - 1e-3
-                data_max = torch.max(observed_data[:, 0])
+                data_min = (torch.min(observed_data[:, 0]) - 1e-3).item()
+                data_max = torch.max(observed_data[:, 0]).item()
 
             normalization_parameters.append((data_min, data_max))
 
-            normalized_observed =  observed_data / data_max
+            normalized_observed = observed_data / data_max
             normalized_d = torch.zeros_like(d)
-            normalized_d[~missing_mask] = normalized_observed  # Assign transformed values
-            normalized_d[missing_mask] = 0  # Missing values set to 0
-
+            normalized_d[observed_mask] = normalized_observed
+            normalized_d[missing_mask] = 0
 
         else:
             # Keep categorical and ordinal values unchanged

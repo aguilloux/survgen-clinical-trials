@@ -46,10 +46,14 @@ class HIVAE(nn.Module):
     # `nn.ModuleDict` (or, for piecewise-survival features, the
     # `_SurvPiecewiseDict` helper) so that all sub-Linears are registered
     # as submodules and picked up by `vae_model.parameters()`.
-    # `self.surv_normalization_globals` holds the (data_min, data_max) used
-    # to scale survival times consistently across all batches; it is set by
-    # the train_HIVAE* functions on the full training set before training,
-    # and remains None for inference paths that don't need it.
+    # `self.feat_normalization_globals` holds per-feature frozen statistics
+    # (mean/var for real & pos, log mean/var for legacy surv, min/max for
+    # the parametric survival families, None for cat/ordinal/count) so the
+    # same scale is used by every forward pass during training, validation,
+    # and generation. It is set by the train_HIVAE* functions on the full
+    # training set before training, and remains None for inference paths
+    # that don't need it (in which case data_processing.normalize_features
+    # falls back to per-batch statistics).
     # Seeding is left to the caller (run / run_alt) — no global seed is set
     # in the constructor.
     def __init__(self, input_dim, z_dim, s_dim, y_dim, y_dim_partition=[], feat_types_dict=[], intervals_surv_piecewise=None, n_layers_surv_piecewise=2):
@@ -67,7 +71,7 @@ class HIVAE(nn.Module):
         self.z_dim = z_dim
         self.s_dim = s_dim
         self.y_dim = sum(self.y_dim_partition)
-        self.surv_normalization_globals = None # populated later by train_HIVAE
+        self.feat_normalization_globals = None # populated later by train_HIVAE*
 
         # for encoder
         self.s_layer = nn.Linear(input_dim, s_dim)  # q(s|x^o)
@@ -137,16 +141,18 @@ class HIVAE(nn.Module):
         """
         Forward pass through the encoder and decoder.
 
-        Survival-time features are normalized using the (data_min, data_max)
-        pair stored in `self.surv_normalization_globals` when it has been set
+        Input features are normalized using the per-feature frozen statistics
+        stored in `self.feat_normalization_globals` when it has been set
         (typically by the train_HIVAE* functions, which freeze it on the full
         training set before training starts). When it is None,
-        batch_normalization computes per-batch min/max instead.
+        normalize_features falls back to per-batch statistics.
         """
-        
-        # Batch normalization 
-        X_list, normalization_params = data_processing.batch_normalization(batch_data_oberved, self.feat_types_list, batch_miss,
-                                                                           surv_globals=self.surv_normalization_globals)
+
+        # Feature normalization (frozen training-set stats when available)
+        X_list, normalization_params = data_processing.normalize_features(
+            batch_data_oberved, self.feat_types_list, batch_miss,
+            feat_normalization_globals=self.feat_normalization_globals,
+        )
         
         # Encode
         X = torch.cat(X_list, dim=1) 
