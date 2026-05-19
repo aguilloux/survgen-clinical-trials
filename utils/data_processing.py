@@ -264,7 +264,8 @@ def compute_feat_normalization_globals(data, feat_types_list, miss_mask):
     same scale is used by every forward pass during training, validation
     and generation.
 
-    Returned list elements:
+    Returned list elements (each statistic is a 0-dim torch.Tensor so
+    downstream likelihood code can call torch.sqrt etc. on it directly):
       - 'real'             : (mean, var)          on observed values
       - 'pos'              : (log_mean, log_var)  on log1p(observed values)
       - 'surv'             : (log_mean, log_var)  on log1p(observed time column)
@@ -299,24 +300,24 @@ def compute_feat_normalization_globals(data, feat_types_list, miss_mask):
             obs = d[observed_mask]
             data_var, data_mean = torch.var_mean(obs, unbiased=False)
             data_var = torch.clamp(data_var, min=1e-6, max=1e20)
-            globals_list.append((data_mean.item(), data_var.item()))
+            globals_list.append((data_mean.detach(), data_var.detach()))
 
         elif feature_type == 'pos':
             obs_log = torch.log1p(d[observed_mask])
             data_var_log, data_mean_log = torch.var_mean(obs_log, unbiased=False)
             data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
-            globals_list.append((data_mean_log.item(), data_var_log.item()))
+            globals_list.append((data_mean_log.detach(), data_var_log.detach()))
 
         elif feature_type == 'surv':
             time_obs_log = torch.log1p(d[observed_mask, 0])
             data_var_log, data_mean_log = torch.var_mean(time_obs_log, unbiased=False)
             data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
-            globals_list.append((data_mean_log.item(), data_var_log.item()))
+            globals_list.append((data_mean_log.detach(), data_var_log.detach()))
 
         elif feature_type in ('surv_weibull', 'surv_loglog', 'surv_piecewise'):
             time_obs = d[observed_mask, 0]
-            data_min = time_obs.min().item() - 1e-3
-            data_max = time_obs.max().item()
+            data_min = (time_obs.min() - 1e-3).detach()
+            data_max = time_obs.max().detach()
             globals_list.append((data_min, data_max))
 
         else:
@@ -388,7 +389,7 @@ def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normali
                 data_var, data_mean = torch.var_mean(observed_data, unbiased=False)
                 data_var = torch.clamp(data_var, min=1e-6, max=1e20)
 
-            normalized_observed = (observed_data - data_mean) / torch.sqrt(torch.as_tensor(data_var, dtype=observed_data.dtype))
+            normalized_observed = (observed_data - data_mean) / torch.sqrt(data_var)
             normalized_d = torch.zeros_like(d)
             normalized_d[observed_mask] = normalized_observed
             normalized_d[missing_mask] = 0
@@ -403,7 +404,7 @@ def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normali
                 data_var_log, data_mean_log = torch.var_mean(observed_data_log, unbiased=False)
                 data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
 
-            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(torch.as_tensor(data_var_log, dtype=observed_data_log.dtype))
+            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(data_var_log)
             normalized_d = torch.zeros_like(d)
             normalized_d[observed_mask] = normalized_observed
             normalized_d[missing_mask] = 0
@@ -425,7 +426,7 @@ def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normali
                 data_var_log, data_mean_log = torch.var_mean(observed_data_log, unbiased=False)
                 data_var_log = torch.clamp(data_var_log, min=1e-6, max=1e20)
 
-            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(torch.as_tensor(data_var_log, dtype=observed_data_log.dtype))
+            normalized_observed = (observed_data_log - data_mean_log) / torch.sqrt(data_var_log)
             normalized_d = torch.zeros_like(d)
             normalized_d[observed_mask, 0] = normalized_observed
             normalized_d[observed_mask, 1] = observed_data[:, 1]
@@ -437,8 +438,8 @@ def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normali
             if feat_globals is not None:
                 data_min, data_max = feat_globals
             else:
-                data_min = (torch.min(observed_data[:, 0]) - 1e-3).item()
-                data_max = torch.max(observed_data[:, 0]).item()
+                data_min = torch.min(observed_data[:, 0]) - 1e-3
+                data_max = torch.max(observed_data[:, 0])
 
             normalization_parameters.append((data_min, data_max))
 

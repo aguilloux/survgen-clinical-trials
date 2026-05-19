@@ -35,7 +35,7 @@ def set_seed(seed=1):
 # scale, then runs the optimizer for `epochs` with early stopping on the
 # validation ELBO. The `seed` argument controls the split RNG and the
 # rest of the loop's stochasticity.
-def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1):
+def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1, start_epoch=0):
 
     # Train-test split on control
     train_test_share = .9
@@ -90,16 +90,17 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
     # Setting for early stopping
     best_val_loss = float('inf')
 
-    patience = 10 # 5
+    patience = 6
     n_iter_validation = 50
     n_iter_min = 100
     counter = 0
     # min_improvement_ratio = 0 #5e-3
     for epoch in range(epochs):
+        global_epoch = epoch + start_epoch
         avg_loss, avg_KL_s, avg_KL_z = 0.0, 0.0, 0.0
         avg_loss_val, avg_KL_s_val, avg_KL_z_val = 0.0, 0.0, 0.0
         samples_list, p_params_list, q_params_list, log_p_x_total, log_p_x_missing_total = [], [], [], [], []
-        tau = max(1.0 - 0.01 * epoch, 1e-3)
+        tau = max(1.0 - 0.01 * global_epoch, 1e-3)
 
         # Shuffle training data
         perm = rng.permutation(data_train.shape[0])
@@ -155,8 +156,8 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
         error_observed_train.append(torch.mean(error_observed_samples))
         error_missing_train.append(torch.mean(error_missing_samples))
         if verbose:
-            if epoch % 100 == 0:
-                visualization.print_loss(epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
+            if global_epoch % 100 == 0:
+                visualization.print_loss(global_epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
 
 
         if epoch % n_iter_validation == 0:
@@ -181,7 +182,7 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
                 counter = 0
 
             if counter >= patience and epoch >= n_iter_min:
-                print(f"Early stopping at epoch {epoch}.")
+                print(f"Early stopping at epoch {global_epoch}.")
                 break
         else:
             loss_val.append(torch.nan)
@@ -351,7 +352,8 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
 def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_generated_sample=None,
         params={"lr": 1e-3, "batch_size": 100, "z_dim": 20, "y_dim": 15, "s_dim": 20, "n_layers_surv_piecewise": 1, "n_intervals": 10},
         epochs=1000, verbose=True, plot=False, gen_from_prior=False, condition=None, differential_privacy=False, batchcorrect=False,
-        seed=1):
+        seed=1,
+        target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
 
     set_seed(seed=seed)
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
@@ -385,7 +387,14 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
                             )
     data = torch.from_numpy(df.values)
     if differential_privacy:
-        model_hivae, loss_train, loss_val = train_HIVAE_DP(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose, seed=seed)
+        if target_epsilon is None:
+            raise ValueError("target_epsilon must be set when differential_privacy=True.")
+        model_hivae, loss_train, loss_val, _ = train_HIVAE_DP(
+            model_hivae, data, miss_mask, true_miss_mask, feat_types_dict,
+            batch_size, lr, epochs,
+            target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+            verbose=verbose, seed=seed,
+        )
     else:
         if batchcorrect:
             model_hivae, loss_train, loss_val = train_HIVAE_bis(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose, seed=seed)
@@ -438,7 +447,8 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
 def run_alt(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_generated_sample=None,
         params={"lr": 1e-3, "batch_size": 100, "z_dim": 20, "y_dim": 15, "s_dim": 20, "n_layers_surv_piecewise": 1, "n_intervals": 10},
         epochs=1000, verbose=True, plot=False, gen_from_prior=False, condition=None, differential_privacy=False, batchcorrect=False,
-        seed=1, n_runs=5):
+        seed=1, n_runs=5,
+        target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
 
     set_seed(seed=seed)
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
@@ -478,7 +488,14 @@ def run_alt(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset
                                     n_layers_surv_piecewise=n_layers
                                     )
         if differential_privacy:
-            model_hivae, loss_train, loss_val = train_HIVAE_DP(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose, seed=seed+run_i)
+            if target_epsilon is None:
+                raise ValueError("target_epsilon must be set when differential_privacy=True.")
+            model_hivae, loss_train, loss_val, _ = train_HIVAE_DP(
+                model_hivae, data, miss_mask, true_miss_mask, feat_types_dict,
+                batch_size, lr, epochs,
+                target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+                verbose=verbose, seed=seed+run_i,
+            )
         else:
             if batchcorrect:
                 model_hivae, loss_train, loss_val = train_HIVAE_bis(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose, seed=seed+run_i)
@@ -590,7 +607,10 @@ def get_batchsize(n_samples, n_splits):
 
     return batch_size
 
-def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_splits, n_trials, columns, generator_name, epochs = 1000, n_generated_sample = None, study_name='optuna_study_surv_hivae', metric='survival_km_distance', method='', gen_from_prior=False, condition=None, cond_df=None, batchcorrect=False, seed=10):
+def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_splits, n_trials, columns, generator_name, epochs = 1000, n_generated_sample = None, study_name='optuna_study_surv_hivae', metric='survival_km_distance', method='', gen_from_prior=False, condition=None, cond_df=None, batchcorrect=False, seed=10,
+                                 target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
+    if "_DP" in generator_name and target_epsilon is None:
+        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
    
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
     miss_mask = miss_mask
@@ -630,7 +650,11 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                             n_layers_surv_piecewise=n_layers)
 
                 if "_DP" in generator_name:
-                    model_hivae, _, _ = train_HIVAE_DP(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, params["lr"], epochs)
+                    model_hivae, _, _, _ = train_HIVAE_DP(
+                        model_hivae, data, miss_mask, true_miss_mask, feat_types_dict,
+                        batch_size, params["lr"], epochs,
+                        target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+                    )
                 else:
                     if batchcorrect:
                         model_hivae, _, _ = train_HIVAE_bis(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, params["lr"], epochs)
@@ -1008,7 +1032,7 @@ from opacus.validators import ModuleValidator
 def train_HIVAE_DP(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
                    batch_size, lr, epochs,
                    target_epsilon, target_delta=1e-5, max_grad_norm=1.0,
-                   verbose=True, seed=1):
+                   verbose=True, seed=1, start_epoch=0):
 
     # ─── Opacus compatibility check ────────────────────────────────────
     # Catches unsupported layers (BatchNorm, LSTM, …) before training. It
@@ -1084,9 +1108,10 @@ def train_HIVAE_DP(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
     n_iter_validation = 50
 
     for epoch in range(epochs):
+        global_epoch = epoch + start_epoch
         avg_loss = avg_KL_s = avg_KL_z = 0.0
         avg_loss_val = avg_KL_s_val = avg_KL_z_val = 0.0
-        tau = max(1.0 - 0.01 * epoch, 1e-3)
+        tau = max(1.0 - 0.01 * global_epoch, 1e-3)
 
         n_batches_seen = 0
         for batch_data_list, batch_miss_list in train_loader:
@@ -1129,8 +1154,8 @@ def train_HIVAE_DP(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
 
         loss_train.append(avg_loss)
 
-        if verbose and epoch % 100 == 0:
-            visualization.print_loss(epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
+        if verbose and global_epoch % 100 == 0:
+            visualization.print_loss(global_epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
 
         # Validation pass — for monitoring only, not used for early stopping.
         if epoch % n_iter_validation == 0:
@@ -1177,7 +1202,7 @@ def train_HIVAE_DP(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
 # reconstruction loss is aggregated to mitigate batch effects across the
 # heterogeneous feature types. The `seed` argument controls split and
 # loop RNG.
-def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1):
+def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1, start_epoch=0):
 
     # Train-test split on control
     train_test_share = .9
@@ -1232,7 +1257,7 @@ def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
     # Setting for early stopping
     best_val_loss = float('inf')
 
-    patience = 10 # 5
+    patience = 6
     n_iter_validation = 50
     n_iter_min = 100
     counter = 0
@@ -1241,11 +1266,12 @@ def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
     train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True) #, drop_last=True)
 
     for epoch in range(epochs):
+        global_epoch = epoch + start_epoch
 
         avg_loss, avg_KL_s, avg_KL_z = 0.0, 0.0, 0.0
         avg_loss_val, avg_KL_s_val, avg_KL_z_val = 0.0, 0.0, 0.0
         samples_list, p_params_list, q_params_list, log_p_x_total, log_p_x_missing_total = [], [], [], [], []
-        tau = max(1.0 - 0.01 * epoch, 1e-3)
+        tau = max(1.0 - 0.01 * global_epoch, 1e-3)
 
         for batch_data_list, batch_miss_list in train_loader:
 
@@ -1296,9 +1322,9 @@ def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
         error_observed_train.append(torch.mean(error_observed_samples))
         error_missing_train.append(torch.mean(error_missing_samples))
         if verbose:
-            if epoch % 100 == 0:
-                visualization.print_loss(epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
-        
+            if global_epoch % 100 == 0:
+                visualization.print_loss(global_epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
+
 
         if epoch % n_iter_validation == 0:
             with torch.no_grad():            
@@ -1322,14 +1348,14 @@ def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
                 counter = 0
 
             if counter >= patience and epoch >= n_iter_min:
-                print(f"Early stopping at epoch {epoch}.")
+                print(f"Early stopping at epoch {global_epoch}.")
                 break
         else:
             loss_val.append(torch.nan)
 
     if verbose:
         print("Training finished.")
-    
+
     return vae_model, loss_train, loss_val
 
 # Optuna-driven hyperparameter search for HIVAE.
@@ -1350,7 +1376,10 @@ def train_HIVAE_bis(vae_model, data, miss_mask, true_miss_mask, feat_types_dict,
 # trial is enqueued first. Returns (best_params, study).
 def optuna_hyperparameter_search_alt(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_splits, n_trials, columns, generator_name,
                                      epochs = 1000, n_generated_sample = None,study_name='optuna_study_surv_hivae', study_path = '', metric='survival_km_distance',
-                                     method='', gen_from_prior=False, condition=None, cond_df=None,batchcorrect=False, seed=10):
+                                     method='', gen_from_prior=False, condition=None, cond_df=None,batchcorrect=False, seed=10,
+                                     target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
+    if "_DP" in generator_name and target_epsilon is None:
+        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
    
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
     miss_mask = miss_mask
@@ -1400,8 +1429,18 @@ def optuna_hyperparameter_search_alt(df, miss_mask, true_miss_mask, feat_types_d
             
 
                 if "_DP" in generator_name:
-                    model_hivae_1, _, _ = train_HIVAE_DP(model_hivae_1, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, params["lr"], epochs, seed = seed)
-                    model_hivae_2, _, _ = train_HIVAE_DP(model_hivae_2, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, params["lr"], epochs, seed = seed+1)
+                    model_hivae_1, _, _, _ = train_HIVAE_DP(
+                        model_hivae_1, data, miss_mask, true_miss_mask, feat_types_dict,
+                        batch_size, params["lr"], epochs,
+                        target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+                        seed=seed,
+                    )
+                    model_hivae_2, _, _, _ = train_HIVAE_DP(
+                        model_hivae_2, data, miss_mask, true_miss_mask, feat_types_dict,
+                        batch_size, params["lr"], epochs,
+                        target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+                        seed=seed+1,
+                    )
                 else:
                     if batchcorrect:
                         model_hivae_1, _, _ = train_HIVAE_bis(model_hivae_1, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, params["lr"], epochs, seed=seed)
@@ -1725,7 +1764,10 @@ def optuna_hyperparameter_search_multisim(df_list, miss_mask_list, true_miss_mas
                                           metric='survival_km_distance', method='',
                                           gen_from_prior=False, condition=None, cond_df_list=None,
                                           batchcorrect=False, seed=1,
-                                          screening_epochs=251, n_startup_trials=20):
+                                          screening_epochs=251, n_startup_trials=20,
+                                          target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
+    if "_DP" in generator_name and target_epsilon is None:
+        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
 
     model_name = "HIVAE_inputDropout"
     n_simulation_seeds = len(df_list)
@@ -1739,15 +1781,25 @@ def optuna_hyperparameter_search_multisim(df_list, miss_mask_list, true_miss_mas
     else:
         cond_loaders = None
 
-    def _train_chunk(model, data, miss_mask, true_miss_mask, batch_size, lr, n_epochs, seed_):
+    def _train_chunk(model, data, miss_mask, true_miss_mask, batch_size, lr, n_epochs, seed_, start_epoch=0):
+        # Normalize the return to a 3-tuple regardless of training routine,
+        # so the downstream unpackers `models[i], _, loss_val_i = ...` work
+        # the same way for DP and non-DP paths. The DP variant additionally
+        # returns final_epsilon; discard it here (train_HIVAE_DP prints it
+        # to stdout when verbose=True).
         if "_DP" in generator_name:
-            return train_HIVAE_DP(model, data, miss_mask, true_miss_mask, feat_types_dict,
-                                  batch_size, lr, n_epochs, seed=seed_)
+            model_, lt, lv, _ = train_HIVAE_DP(
+                model, data, miss_mask, true_miss_mask, feat_types_dict,
+                batch_size, lr, n_epochs,
+                target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+                seed=seed_, start_epoch=start_epoch,
+            )
+            return model_, lt, lv
         if batchcorrect:
             return train_HIVAE_bis(model, data, miss_mask, true_miss_mask, feat_types_dict,
-                                   batch_size, lr, n_epochs, seed=seed_)
+                                   batch_size, lr, n_epochs, seed=seed_, start_epoch=start_epoch)
         return train_HIVAE(model, data, miss_mask, true_miss_mask, feat_types_dict,
-                           batch_size, lr, n_epochs, seed=seed_)
+                           batch_size, lr, n_epochs, seed=seed_, start_epoch=start_epoch)
 
     def _build_model(input_dim, params, intervals_i, n_layers):
         model_loading = getattr(importlib.import_module("src"), model_name)
@@ -1824,7 +1876,8 @@ def optuna_hyperparameter_search_multisim(df_list, miss_mask_list, true_miss_mas
                         np.random.seed(seed)
                         models[i], _, _ = _train_chunk(models[i], data_list[i], miss_mask_list[i],
                                                        true_miss_mask_list[i], batch_sizes[i],
-                                                       params["lr"], remaining_epochs, seed)
+                                                       params["lr"], remaining_epochs, seed,
+                                                       start_epoch=screening_epochs)
 
                 for i in range(n_simulation_seeds):
                     n_gen_sample_i = n_generated_sample if n_generated_sample is not None else data_list[i].shape[0]
@@ -1868,7 +1921,8 @@ def optuna_hyperparameter_search_multisim(df_list, miss_mask_list, true_miss_mas
                         np.random.seed(seed)
                         models[i], _, _ = _train_chunk(models[i], train_data_list[i], train_miss_list[i],
                                                        train_true_miss_list[i], batch_sizes[i],
-                                                       params["lr"], remaining_epochs, seed)
+                                                       params["lr"], remaining_epochs, seed,
+                                                       start_epoch=screening_epochs)
 
                 for i in range(n_simulation_seeds):
                     n_gen_sample_i = n_generated_sample if n_generated_sample is not None else data_list[i].shape[0]
@@ -1920,7 +1974,8 @@ def optuna_hyperparameter_search_multisim(df_list, miss_mask_list, true_miss_mas
                         np.random.seed(seed)
                         models[i], _, _ = _train_chunk(models[i], train_data_list[i], train_miss_list[i],
                                                        train_true_miss_list[i], batch_sizes[i],
-                                                       params["lr"], remaining_epochs, seed)
+                                                       params["lr"], remaining_epochs, seed,
+                                                       start_epoch=screening_epochs)
 
                 for i in range(n_simulation_seeds):
                     est = generate_from_HIVAE(models[i], test_data_list[i], test_miss_list[i],
@@ -1983,7 +2038,10 @@ def optuna_hyperparameter_search_multiseed(df, miss_mask, true_miss_mask, feat_t
                                            gen_from_prior=False, condition=None, cond_df=None,
                                            batchcorrect=False, seed=10,
                                            n_training_seeds=3,
-                                           screening_epochs=251, n_startup_trials=20):
+                                           screening_epochs=251, n_startup_trials=20,
+                                           target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
+    if "_DP" in generator_name and target_epsilon is None:
+        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
 
     model_name = "HIVAE_inputDropout"
     if condition is not None and cond_df is None:
@@ -1991,15 +2049,25 @@ def optuna_hyperparameter_search_multiseed(df, miss_mask, true_miss_mask, feat_t
     cond_loader = (SurvivalAnalysisDataLoader(cond_df, target_column="censor", time_to_event_column="time")
                    if condition is not None else None)
 
-    def _train_chunk(model, data, miss_mask_, true_miss_mask_, batch_size, lr, n_epochs, seed_):
+    def _train_chunk(model, data, miss_mask_, true_miss_mask_, batch_size, lr, n_epochs, seed_, start_epoch=0):
+        # Normalize the return to a 3-tuple regardless of training routine,
+        # so the downstream unpackers `models[i], _, loss_val_i = ...` work
+        # the same way for DP and non-DP paths. The DP variant additionally
+        # returns final_epsilon; discard it here (train_HIVAE_DP prints it
+        # to stdout when verbose=True).
         if "_DP" in generator_name:
-            return train_HIVAE_DP(model, data, miss_mask_, true_miss_mask_, feat_types_dict,
-                                  batch_size, lr, n_epochs, seed=seed_)
+            model_, lt, lv, _ = train_HIVAE_DP(
+                model, data, miss_mask_, true_miss_mask_, feat_types_dict,
+                batch_size, lr, n_epochs,
+                target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=max_grad_norm,
+                seed=seed_, start_epoch=start_epoch,
+            )
+            return model_, lt, lv
         if batchcorrect:
             return train_HIVAE_bis(model, data, miss_mask_, true_miss_mask_, feat_types_dict,
-                                   batch_size, lr, n_epochs, seed=seed_)
+                                   batch_size, lr, n_epochs, seed=seed_, start_epoch=start_epoch)
         return train_HIVAE(model, data, miss_mask_, true_miss_mask_, feat_types_dict,
-                           batch_size, lr, n_epochs, seed=seed_)
+                           batch_size, lr, n_epochs, seed=seed_, start_epoch=start_epoch)
 
     def _build_model(input_dim, params, intervals_, n_layers):
         model_loading = getattr(importlib.import_module("src"), model_name)
@@ -2072,7 +2140,8 @@ def optuna_hyperparameter_search_multiseed(df, miss_mask, true_miss_mask, feat_t
                     for i in range(n_training_seeds):
                         np.random.seed(seed + i)
                         models[i], _, _ = _train_chunk(models[i], data, miss_mask, true_miss_mask,
-                                                       batch_size, params["lr"], remaining_epochs, seed + i)
+                                                       batch_size, params["lr"], remaining_epochs, seed + i,
+                                                       start_epoch=screening_epochs)
 
                 gt_loader = cond_loader if condition is not None else full_loader
                 n_gen_sample_ = n_generated_sample if n_generated_sample is not None else data.shape[0]
@@ -2114,7 +2183,8 @@ def optuna_hyperparameter_search_multiseed(df, miss_mask, true_miss_mask, feat_t
                         np.random.seed(seed + i)
                         models[i], _, _ = _train_chunk(models[i], train_data_list[i], train_miss_list[i],
                                                        train_true_miss_list[i], batch_sizes[i],
-                                                       params["lr"], remaining_epochs, seed + i)
+                                                       params["lr"], remaining_epochs, seed + i,
+                                                       start_epoch=screening_epochs)
 
                 gt_loader = cond_loader if condition is not None else full_loader
                 n_gen_sample_ = n_generated_sample if n_generated_sample is not None else data.shape[0]
@@ -2165,7 +2235,8 @@ def optuna_hyperparameter_search_multiseed(df, miss_mask, true_miss_mask, feat_t
                         np.random.seed(seed + i)
                         models[i], _, _ = _train_chunk(models[i], train_data_list[i], train_miss_list[i],
                                                        train_true_miss_list[i], batch_sizes[i],
-                                                       params["lr"], remaining_epochs, seed + i)
+                                                       params["lr"], remaining_epochs, seed + i,
+                                                       start_epoch=screening_epochs)
 
                 for i in range(n_training_seeds):
                     est = generate_from_HIVAE(models[i], test_data_list[i], test_miss_list[i],
