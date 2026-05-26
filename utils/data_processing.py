@@ -434,7 +434,7 @@ def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normali
 
             normalization_parameters.append((data_mean_log, data_var_log))
 
-        elif feature_type in ('surv_weibull', 'surv_loglog', 'surv_piecewise'):
+        elif feature_type == 'surv_weibull':
             if feat_globals is not None:
                 data_min, data_max = feat_globals
             else:
@@ -443,9 +443,25 @@ def normalize_features(batch_data_list, feat_types_list, miss_list, feat_normali
 
             normalization_parameters.append((data_min, data_max))
 
-            normalized_observed = observed_data / data_max
+            normalized_observed = observed_data[:, 0] / data_max
             normalized_d = torch.zeros_like(d)
-            normalized_d[observed_mask] = normalized_observed
+            normalized_d[observed_mask, 0] = normalized_observed
+            normalized_d[observed_mask, 1] = observed_data[:, 1]
+            normalized_d[missing_mask] = 0
+        
+        elif feature_type in ('surv_loglog', 'surv_piecewise'):
+            if feat_globals is not None:
+                data_min, data_max = feat_globals
+            else:
+                data_min = torch.min(observed_data[:, 0]) - 1e-3
+                data_max = torch.max(observed_data[:, 0])
+
+            normalization_parameters.append((data_min, data_max))
+
+            normalized_observed = (observed_data[:, 0] - data_min) / (data_max - data_min)
+            normalized_d = torch.zeros_like(d)
+            normalized_d[observed_mask, 0] = normalized_observed
+            normalized_d[observed_mask, 1] = observed_data[:, 1]
             normalized_d[missing_mask] = 0
 
         else:

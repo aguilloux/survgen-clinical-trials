@@ -209,7 +209,8 @@ def general_metrics(data_init, data_gen, generator):
         "stats.survival_km_distance.abs_optimism": "Survival curves distance",
         "detection.detection_xgb.mean": "Detection XGB",
         "sanity.nearest_syn_neighbor_distance.mean": "NNDR",
-        "privacy.k-map.score": "K-map score"
+        "privacy.k-map.score": "K-map score",
+        "privacy.identifiability_score.score": "Identifiability score"
     }
 
     scores = []
@@ -303,7 +304,8 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
         "stats.survival_km_distance.abs_optimism": "Survival curves distance",
         "detection.detection_xgb.mean": "Detection XGB",
         "sanity.nearest_syn_neighbor_distance.mean": "NNDR",
-        "privacy.k-map.score": "K-map score"
+        "privacy.k-map.score": "K-map score",
+        "privacy.identifiability_score.score": "Identifiability score"
     }
 
     scores = []
