@@ -255,6 +255,48 @@ def load_data_types(types_file):
         return [{k: v for k, v in row.items()} for row in csv.DictReader(f, skipinitialspace=True)]
 
 
+def resolve_feat_normalization_globals(globals_list, feat_types_list, norm_mode):
+    """
+    Select which frozen statistics to keep for the requested normalization
+    mode, given the full per-feature globals from
+    compute_feat_normalization_globals.
+
+    Parameters
+    ----------
+    globals_list : list
+        Full per-feature statistics (one entry per feature, or None for
+        types that need none), as returned by
+        compute_feat_normalization_globals.
+    feat_types_list : list of dict
+        Feature descriptors, same order as globals_list. Kept for API
+        symmetry with 'global' mode; not needed to build the 'batch' list.
+    norm_mode : {'global', 'batch'}
+        'global' : every feature keeps its frozen global statistics
+                   (globals_list returned unchanged).
+        'batch'  : every feature falls back to per-batch statistics — each
+                   entry is set to None so normalize_features recomputes the
+                   statistics (mean/var for the z-score families, min/max for
+                   the survival families) from each batch. count / cat /
+                   ordinal carry no statistics (already None).
+
+    Returns
+    -------
+    list
+        The per-feature statistics list to store on
+        vae_model.feat_normalization_globals.
+
+    Raises
+    ------
+    ValueError
+        If norm_mode is not 'global' or 'batch'.
+    """
+    if norm_mode == "global":
+        return globals_list
+    if norm_mode == "batch":
+        return [None] * len(globals_list)
+    raise ValueError(f"norm_mode must be 'global' or 'batch', got {norm_mode!r}.")
+
+
 def compute_feat_normalization_globals(data, feat_types_list, miss_mask):
     """
     Computes frozen normalization statistics on the full (training) set,
