@@ -136,7 +136,7 @@ def run(generator_name):
                                                                                             n_trials=n_trials, 
                                                                                             columns=fnames,
                                                                                             generator_name=generator_name,
-                                                                                            epochs=10000,
+                                                                                            fixed_params={{'epochs': 10000}},
                                                                                             metric=metric_optuna,
                                                                                             study_name=study_name, 
                                                                                             method=method_hyperopt, 
