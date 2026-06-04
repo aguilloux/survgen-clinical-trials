@@ -17,6 +17,9 @@ import numpy as np
 
 import likelihood, statistic, data_processing, theta_estimation
 
+from diffuse_model import LatentDiffusion
+import jax.numpy as jnp
+
 def set_seed(seed=1):
     random.seed(seed)                            # Python built-in
     np.random.seed(seed)                         # NumPy
@@ -174,6 +177,70 @@ class HIVAE(nn.Module):
             "KL_z": KL_z,
             "p_params": p_params,
             "q_params": q_params
+        }
+
+    def diffuse_forward(
+        self,
+        batch_data_observed,
+        batch_data,
+        batch_miss,
+        tau: float = 1.0,
+        n_generated_dataset: int = 1,
+        diffusion_hidden_dim: int = 256,
+        diffusion_n_steps: int = 100,
+        diffusion_n_epochs: int = 50,
+    ):
+        """
+        Encode → fit latent diffusion model → sample → decode.
+
+        The score network is trained from scratch on the encoded latents of
+        the current batch, then used to draw new latent samples that are
+        decoded exactly like the standard forward pass.
+        """
+        # ── 1. Normalize & encode ──────────────────────────────────────
+        X_list, normalization_params = data_processing.normalize_features(
+            batch_data_observed, self.feat_types_list, batch_miss,
+            feat_normalization_globals=self.feat_normalization_globals,
+        )
+        X = torch.cat(X_list, dim=1)
+        q_params, samples = self.encode(X, tau)
+
+        # ── 2. Fit diffusion on encoded latents ───────────────────────
+        latent_dim = self.s_dim + self.z_dim
+        latents_np = jnp.concatenate(
+            (samples["s"].detach().numpy(), samples["z"].detach().numpy()), axis=1
+        )
+        n_generated_sample = samples["s"].shape[0]
+
+        diffusion = LatentDiffusion(
+            latent_dim=latent_dim,
+            hidden_dim=diffusion_hidden_dim,
+            n_steps=diffusion_n_steps,
+            n_epochs=diffusion_n_epochs,
+        )
+        diffusion.fit(latents_np)
+
+        # ── 3. Sample new latents & convert to torch ──────────────────
+        diffuse_samples = diffusion.sample(n_generated_sample)
+        samples["s"] = torch.tensor(np.array(diffuse_samples[:, : self.s_dim]), dtype=torch.float32)
+        samples["z"] = torch.tensor(np.array(diffuse_samples[:, self.s_dim :]), dtype=torch.float32)
+
+        # ── 4. Decode & compute loss ──────────────────────────────────
+        p_params, log_p_x, log_p_x_missing, samples = self.decode(
+            samples, batch_data, batch_miss, normalization_params, n_generated_dataset
+        )
+        ELBO, loss_reconstruction, KL_z, KL_s = self.loss_function(log_p_x, p_params, q_params)
+
+        return {
+            "samples": samples,
+            "log_p_x": log_p_x,
+            "log_p_x_missing": log_p_x_missing,
+            "loss_re": loss_reconstruction,
+            "neg_ELBO_loss": -ELBO,
+            "KL_s": KL_s,
+            "KL_z": KL_z,
+            "p_params": p_params,
+            "q_params": q_params,
         }
 
     def decode(self, samples, batch_data_list, miss_list, normalization_params, n_generated_dataset=1):

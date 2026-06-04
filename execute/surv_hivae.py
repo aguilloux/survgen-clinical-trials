@@ -321,7 +321,7 @@ def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat
 # GENERATION FUNCTIONS: without conditioning on a feature value.
 # ──────────────────────────────────────────────────────────────
  
-def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False):
+def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffuse=False):
     """
         Generation from a trained HIVAE, without conditioning. 
         If `n_generated_sample` is specified, generation is performed on an extended dataset of that size (with samples drawn with replacement from the original data) 
@@ -368,7 +368,10 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
             samples_list.append(samples)
 
         else:
-            vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
+            if diffuse:
+                vae_res = vae_model.diffuse_forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
+            else:
+                vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
             samples_list.append(vae_res["samples"])
         
         # Concatenate samples in arrays
@@ -547,7 +550,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
             if condition is not None:
                 est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, condition=condition)
             else:
-                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior)
+                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffuse=diffuse)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
@@ -555,7 +558,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
         if condition is not None:
             est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition)
         else:
-            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior)
+            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffuse=diffuse)
 
         if plot:
             loss_track = {"epoch": list(range(1, len(loss_train) + 1)),
