@@ -939,6 +939,8 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
         except Exception as e:  # invalid set of params
             print(f"{type(e).__name__}: {e}")
             print(params)
+            if isinstance(e, ValueError) and "invalid values" in str(e).lower():
+                raise optuna.exceptions.TrialPruned()
             raise
         return np.mean(scores)
 
