@@ -954,9 +954,9 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
         sampler = optuna.samplers.TPESampler(seed=seed)
         study = optuna.create_study(direction="minimize", study_name=study_name, storage='sqlite:///'+study_name+'.db', sampler=sampler, pruner=pruner)
         if "HI-VAE_piecewise" in generator_name:
-            default_params = {"lr": 1e-3, "batch_size": 100, "z_dim": 20, "y_dim": 15, "s_dim": 20, "n_layers_surv_piecewise": 1, "n_intervals": 10}
+            default_params = {"lr": 1e-3, "batch_size": 32, "z_dim": 20, "y_dim": 15, "s_dim": 20, "n_layers_surv_piecewise": 1, "n_intervals": 10}
         else:
-            default_params = {"lr": 1e-3, "batch_size": 100, "z_dim": 20, "y_dim": 15, "s_dim": 20}
+            default_params = {"lr": 1e-3, "batch_size": 32, "z_dim": 20, "y_dim": 15, "s_dim": 20}
         if "_DP" in generator_name:
             default_params["max_grad_norm"] = 1.0
             default_params["epochs"] = 1000

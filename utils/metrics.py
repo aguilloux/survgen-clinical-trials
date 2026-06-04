@@ -235,7 +235,7 @@ def general_metrics(data_init, data_gen, generator):
                                         metrics={'stats': ['jensenshannon_dist', 'ks_test', 'survival_km_distance'], 
                                                  'detection': ['detection_xgb'],
                                                  'sanity': ['nearest_syn_neighbor_distance'],
-                                                 'privacy': ['k-map']
+                                                 'privacy': ['k-map', 'identifiability_score']
                                                 }, # compute only selected metrics
                                         task_type='survival_analysis', 
                                         # n_folds=1,
@@ -262,7 +262,7 @@ def general_metrics(data_init, data_gen, generator):
         scores.append(values)
 
     score_df = pd.DataFrame(scores, columns=["J-S distance", "KS test", "Survival curves distance", 
-                                             "Detection XGB", "NNDR", "K-map score"])
+                                             "Detection XGB", "NNDR", "K-map score", "Identifiability score"])
     score_df["generator"] = generator
 
     return score_df
