@@ -491,7 +491,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
         verbose=True, plot=False, gen_from_prior=False, condition=None, differential_privacy=False,
         norm_mode="global",
         seed=1,
-        target_epsilon=None, target_delta=1e-5,
+        target_epsilon=None, target_delta=1e-5, diffuse=False,
         **hp_overrides):
     """
         End-to-end entry point: build a HIVAE, train it on `df`, and generate `n_generated_dataset` synthetic datasets.
