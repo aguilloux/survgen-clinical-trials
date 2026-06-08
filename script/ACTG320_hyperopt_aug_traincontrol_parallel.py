@@ -80,7 +80,7 @@ def run(generator_name):
         df_init_control["treatment"] = 0
        
         # Parameters of the optuna study
-        metric_optuna = "survival_km_distance" # metric to{} optimize in optuna
+        metric_optuna = "survival_km_distance" # metric to optimize in optuna
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
