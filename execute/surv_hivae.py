@@ -47,7 +47,7 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
             "batch"            : every feature recomputes its statistics from each batch (mean/var for real / pos / legacy 'surv',
                                 min/max for the survival families). Not allowed under differential privacy.
     """
-    _validate_norm_mode(norm_mode, differential_privacy=True)
+    _validate_norm_mode(norm_mode, differential_privacy=differential_privacy)
 
     if differential_privacy:
         # ─── Opacus compatibility check ────────────────────────────────────
