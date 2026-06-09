@@ -36,10 +36,11 @@ def run(generator_name):
     feature_types_list = ["real", "cat"]
     independent = True
     data_types_create = True
+    seed_data = 0
 
     control, treated, types = simulation(treatment_effect, n_samples, independent, feature_types_list,
                                          n_features_bytype, n_active_features, p_treated, shape_T,
-                                         shape_C, scale_C, scale_C_indep, data_types_create, seed=0)
+                                         shape_C, scale_C, scale_C_indep, data_types_create, seed=seed_data)
 
     control = control.drop(columns='treatment')
     treated = treated.drop(columns='treatment')
@@ -110,11 +111,13 @@ def run(generator_name):
 
     # Parameters of the optuna study
     HPO_version = "external_metrics" # "external_metrics" or "validation_loss"
-    metric_optuna = ["survival_km_distance", "k-map"] # metric to optimize in optuna
+    metric_optuna = ["survival_km_distance"] #, "k-map"] # metric to optimize in optuna
     method_hyperopt = "train_full_gen_full"
     n_splits = 3 # number of splits for cross-validation
     n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
     name_config = "simu_N{}_nfeat{}_t{}".format(n_samples, n_features_bytype, int(treatment_effect))
+    seed_HPO = 10
+    optuna_version_name = "ExMetrics1_seedData{}_seedHPO{}".format(seed_data, seed_HPO)
 
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
                     "HI-VAE_piecewise" : surv_hivae,
@@ -143,12 +146,10 @@ def run(generator_name):
     best_params_dict, study_dict = {}, {}
     # for generator_name in generators_sel:
     # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
-    n_trials = 50
+    n_trials = 150
     print("{} trials for {}...".format(n_trials, generator_name))
-    # study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, metric_optuna, generator_name)
-    # best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, metric_optuna, generator_name)
-    study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_test"
-    best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_test.json"
+    study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, optuna_version_name, generator_name)
+    best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, optuna_version_name, generator_name)
     db_file = study_name + ".db"
     if os.path.exists(db_file):
         print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))
@@ -195,7 +196,7 @@ def run(generator_name):
                                                                                             screening_epochs=800,
                                                                                             n_startup_trials=20,
                                                                                             differential_privacy=differential_privacy, 
-                                                                                            diffuse=diffuse, 
+                                                                                            diffusion=diffuse, 
                                                                                             do_prune=False) 
         elif HPO_version == "validation_loss":
             best_params_HIVAE, study = generators_dict[generator_name].optuna_hyperparameter_search_HIVAE_loss(df_init_control_encoded, 
@@ -258,11 +259,12 @@ def setup_unique_working_dir(base_dir="experiments"):
   
 
 if __name__ == "__main__":
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
-                      "Surv-GAN", "Surv-VAE", 
-                      "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior", 
-                      "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP", 
-                      "HI-VAE_weibull_diffuse", "HI-VAE_piecewise_diffuse", 
-                      "HI-VAE_weibull_diffuse_DP", "HI-VAE_piecewise_diffuse_DP"]
+    # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
+    #                   "Surv-GAN", "Surv-VAE", 
+    #                   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior", 
+    #                   "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP", 
+    #                   "HI-VAE_weibull_diffuse", "HI-VAE_piecewise_diffuse", 
+    #                   "HI-VAE_weibull_diffuse_DP", "HI-VAE_piecewise_diffuse_DP"]
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise"]
     generator_id = int(sys.argv[1])
     run(generators_sel[generator_id])

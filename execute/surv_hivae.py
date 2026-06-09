@@ -855,6 +855,8 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                     if "_diffusion" in generator_name:
                         valid_keys = {"diffusion_hidden_dim", "diffusion_batch_size", "diffusion_lr"}
                         diffusion_params = {k: v for k, v in (params or {}).items() if k in valid_keys}
+                    else:
+                        diffusion_params = {}
                     est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
                                                                    n_generated_sample=n_gen_sample, from_prior=gen_from_prior, diffusion=diffusion, diffusion_params=diffusion_params)
