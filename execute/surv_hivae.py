@@ -34,7 +34,9 @@ def set_seed(seed=1):
 # ───────────────────────
 # TRAINING HIVAE FUNCTION
 # ───────────────────────
-def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1, start_epoch=0, norm_mode="global", differential_privacy=False, target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0):
+def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1, 
+                start_epoch=0, norm_mode="global", differential_privacy=False, target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0,
+                train_val_share=0.9):
     """ 
         HIVAE training function.
         Splits `data` into 90/10 train/validation, freezes per-feature normalization statistics on the full training set and stores them on
@@ -65,9 +67,9 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
     noise_generator = torch.Generator(device="cpu").manual_seed(seed)
 
     # ─── Train-test split on control ────────────
-    train_test_share = .9
+    train_val_share = train_val_share
     n_samples = data.shape[0]
-    n_train_samples = int(train_test_share * n_samples)
+    n_train_samples = int(train_val_share * n_samples)
     train_index = rng.choice(n_samples, n_train_samples, replace=False)
     test_index = np.setdiff1d(np.arange(n_samples), train_index)
 
@@ -202,6 +204,7 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
             else: 
                 best_val_loss = avg_loss_val
                 counter = 0
+            early_stop = False
             if counter >= patience and epoch >= n_iter_min:
                 print(f"Early stopping at epoch {global_epoch}.")
                 early_stop = True
@@ -443,48 +446,6 @@ def _validate_norm_mode(norm_mode, differential_privacy):
             "Use norm_mode='global'."
         )
 
-# ─── MedianPruner screening helpers (shared by the optuna_* searches) ───
-# Pruning trains each trial for `screening_epochs` first, reports the model's validation ELBO loss at that point,
-# and lets Optuna's MedianPruner stop trials that look worse than the running median before the remaining epochs are spent. 
-# `n_trials` therefore stays the *total* number of trials Optuna runs (study.optimize(n_trials=n_trials)) 
-# — pruned trials simply finish early at the screening epoch. 
-def _last_finite_val_loss(loss_val):
-    """
-        Return the last non-NaN entry of a train_HIVAE* `loss_val` list as a
-        float. Validation loss is only recorded every n_iter_validation epochs
-        (other epochs hold NaN), so the final list element is not necessarily a
-        real value — pick the last finite one. Falls back to +inf when the list
-        has no finite entry (e.g. screening shorter than one validation cycle),
-        which makes such a trial look maximally prunable rather than crashing.
-    """
-    finite = [v for v in loss_val if v == v]  # v == v is False for NaN
-    return float(finite[-1]) if finite else float("inf")
-
-def _report_and_maybe_prune(trial, screening_val_losses, screening_epochs):
-    """
-        Report the mean screening validation loss to `trial` at
-        step=screening_epochs and raise optuna.TrialPruned() if the pruner
-        decides this trial is not worth continuing. `screening_val_losses` is
-        one value per trained model (a single-element list outside the
-        multi-model searches).
-    """
-    finite = [v for v in screening_val_losses if v == v]
-    avg_val = float(np.mean(finite)) if finite else float("inf")
-    print(f"Screening avg val loss @ epoch {screening_epochs}: {avg_val}")
-    trial.report(avg_val, step=screening_epochs)
-    if trial.should_prune():
-        raise optuna.TrialPruned()
-
-def _make_pruner(generator_name, n_startup_trials):
-    """
-        MedianPruner for non-DP generators, NopPruner for DP ones (the caller
-        also skips the screening split in the DP case, so NopPruner is just a
-        belt-and-braces no-op). Attached to the study at create/load time.
-    """
-    if "_DP" in generator_name:
-        return optuna.pruners.NopPruner()
-    return optuna.pruners.MedianPruner(n_startup_trials=n_startup_trials)
-
 
 def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_generated_sample=None,
         params=None,
@@ -701,15 +662,109 @@ def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params,
             f"values in fixed_params."
         )
 
+# ─── MedianPruner screening helpers (shared by the optuna_* searches) ───
+# Pruning trains each trial for `screening_epochs` first, reports the model's validation ELBO loss at that point,
+# and lets Optuna's MedianPruner stop trials that look worse than the running median before the remaining epochs are spent. 
+# `n_trials` therefore stays the *total* number of trials Optuna runs (study.optimize(n_trials=n_trials)) 
+# — pruned trials simply finish early at the screening epoch. 
+def _last_finite_val_loss(loss_val):
+    """
+        Return the last non-NaN entry of a train_HIVAE* `loss_val` list as a
+        float. Validation loss is only recorded every n_iter_validation epochs
+        (other epochs hold NaN), so the final list element is not necessarily a
+        real value — pick the last finite one. Falls back to +inf when the list
+        has no finite entry (e.g. screening shorter than one validation cycle),
+        which makes such a trial look maximally prunable rather than crashing.
+    """
+    finite = [v for v in loss_val if v == v]  # v == v is False for NaN
+    return float(finite[-1]) if finite else float("inf")
+
+def _report_and_maybe_prune(trial, screening_val_losses, screening_epochs):
+    """
+        Report the mean screening validation loss to `trial` at
+        step=screening_epochs and raise optuna.TrialPruned() if the pruner
+        decides this trial is not worth continuing. `screening_val_losses` is
+        one value per trained model (a single-element list outside the
+        multi-model searches).
+    """
+    finite = [v for v in screening_val_losses if v == v]
+    avg_val = float(np.mean(finite)) if finite else float("inf")
+    print(f"Screening avg val loss @ epoch {screening_epochs}: {avg_val}")
+    trial.report(avg_val, step=screening_epochs)
+    if trial.should_prune():
+        raise optuna.TrialPruned()
+
+def _screen_train(trial, do_prune, model, data_, miss_, true_miss_, feat_types_dict_, batch_size, lr_, epochs_, norm_mode_, screening_epochs_ ,differential_privacy_, target_epsilon_, target_delta_, max_grad_norm_, split_seed=0, train_val_share=0.9):
+    # Train `model` with optional MedianPruner screening. When pruning is active and screening_epochs < epochs, train a screening chunk, 
+    # report its validation loss / maybe prune, then train the remaining epochs from the screening weights.
+    # numpy is reseeded before each chunk so the two chunks share train_HIVAE's internal train/val split.
+    if do_prune and screening_epochs_ < epochs_:
+        np.random.seed(split_seed)
+        model, _, lv = train_HIVAE(model, data_, miss_, true_miss_, feat_types_dict_, 
+                                    batch_size, lr_, screening_epochs_, norm_mode=norm_mode_, 
+                                    differential_privacy=differential_privacy_, target_epsilon=target_epsilon_, 
+                                    target_delta=target_delta_, max_grad_norm=max_grad_norm_, train_val_share=train_val_share)
+        _report_and_maybe_prune(trial, [_last_finite_val_loss(lv)], screening_epochs_)
+        np.random.seed(split_seed)
+        model, _, _ = train_HIVAE(model, data_, miss_, true_miss_, feat_types_dict_,
+                                    batch_size, lr_, epochs_ - screening_epochs_,
+                                    norm_mode=norm_mode_, start_epoch=screening_epochs_,
+                                    differential_privacy=differential_privacy_, target_epsilon=target_epsilon_, 
+                                    target_delta=target_delta_, max_grad_norm=max_grad_norm_, train_val_share=train_val_share)
+    else:
+        model, _, lv = train_HIVAE(model, data_, miss_, true_miss_, feat_types_dict_,
+                                    batch_size, lr_, epochs_, norm_mode=norm_mode_, 
+                                    differential_privacy=differential_privacy_, target_epsilon=target_epsilon_, 
+                                    target_delta=target_delta_, max_grad_norm=max_grad_norm_, train_val_share=train_val_share)
+    return model, lv
+
+
+
+def _evaluate_generation(gen_data, ref_loader, metrics_list, columns):
+    metrics_dict_evaluation, metrics_synthcity, expected_metrics = metrics.map_metrics_HPO(metrics_list)
+    tensor_list = list(gen_data)
+    full_data_tensor = torch.cat(tensor_list, dim=0)
+    df_gen_data = pd.DataFrame(full_data_tensor.numpy(), columns=columns)
+    df_gen_data["time"] = df_gen_data["time"].clip(lower=1e-6)
+    df_gen_data["treatment"] = 0
+    other_cols = [c for c in df_gen_data.columns if c not in ["time", "censor"]]
+    df_gen_data = df_gen_data[["time", "censor"] + other_cols]
+    gen_data = SurvivalAnalysisDataLoader(df_gen_data, target_column="censor", time_to_event_column="time")
+    clear_cache()
+    evaluation = Metrics().evaluate(
+        X_gt=ref_loader,
+        X_syn=gen_data,
+        reduction='mean',
+        n_histogram_bins=10,
+        # n_folds=1,
+        metrics=metrics_dict_evaluation,
+        task_type='survival_analysis',
+        use_cache=True,
+    )
+    scores = []
+    for metric in metrics_synthcity:
+        if metric in evaluation.T.columns:
+            if expected_metrics[metric] == "max":
+                val = - evaluation.T[[metric]].T["mean"].values[0]
+            else:
+                val = evaluation.T[[metric]].T["mean"].values[0]
+            print(f"{metric}: {val:.4f}")
+        else:
+            val = np.nan
+            print(f"Warning: metric '{metric}' not found in evaluation results. Using NaN as fallback.")
+        scores.append(val)
+    return scores
+
 
 def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_splits, n_trials, 
                                  columns, generator_name, n_generated_sample = None, study_name='optuna_study_surv_hivae', 
                                  metric='survival_km_distance', method='', gen_from_prior=False, condition=None, cond_df=None, seed=10,
                                  target_epsilon=None, target_delta=1e-5,
                                  tune_params=None, fixed_params=None, norm_mode="global",
-                                 screening_epochs=800, n_startup_trials=20, do_prune=False):
+                                 screening_epochs=800, n_startup_trials=20, 
+                                 differential_privacy=False, diffuse=False, do_prune=False):
     
-    differential_privacy = "_DP" in generator_name
+    # differential_privacy = "_DP" in generator_name
     if differential_privacy and target_epsilon is None:
         raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
 
@@ -717,10 +772,242 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
     _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params)
 
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
-    miss_mask = miss_mask
-    true_miss_mask = true_miss_mask
     if condition is not None and cond_df is not None:
         cond_full_data_loader =  SurvivalAnalysisDataLoader(cond_df, target_column = "censor", time_to_event_column = "time")
+    
+    metrics_list = metric if isinstance(metric, list) else [metric]
+    print(f"Metrics for optimization: {metrics_list}")
+    is_multi_objective = len(metrics_list) > 1
+    if do_prune:
+        if is_multi_objective or differential_privacy:
+            do_prune = False  # Pruning is not supported in multi-objective optimization, so we disable it when multiple metrics are provided.
+            print("[Warning] Multiple metrics detected, disabling pruning since it's not supported in multi-objective optimization.")
+
+    def objective(trial: optuna.Trial):
+        set_seed(seed=seed)
+        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params)
+        sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
+        params = {**(fixed_params or {}), **sampled}
+        epochs = params["epochs"]
+        max_grad_norm = params.get("max_grad_norm", None)
+        if "HI-VAE_piecewise" in generator_name:
+            intervals = get_intervals(df, params["n_intervals"])
+            n_layers = params["n_layers_surv_piecewise"]
+        else:
+            intervals = None
+            n_layers = None
+        print(f"trial_{trial.number}")
+        print(f"Hyperparameters: {params}")
+        model_loading = getattr(importlib.import_module("src"), model_name)
+        data = torch.from_numpy(df.values)
+
+        scores = []
+        try:
+            # ----------------------------------------------------------
+            # METHOD: train_full_gen_full
+            # ----------------------------------------------------------
+            if method == 'train_full_gen_full':
+                # Train
+                batch_size = params["batch_size"]
+                batch_size = min(batch_size, int(0.9*data.shape[0]))
+                model_hivae = model_loading(input_dim=data.shape[1],
+                                            z_dim=params["z_dim"],
+                                            y_dim=params["y_dim"],
+                                            s_dim=params["s_dim"],
+                                            y_dim_partition=None,
+                                            feat_types_dict=feat_types_dict,
+                                            intervals_surv_piecewise=intervals,
+                                            n_layers_surv_piecewise=n_layers)
+                model_hivae, lv = _screen_train(trial, do_prune, model_hivae, data, miss_mask, true_miss_mask, 
+                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode, 
+                                            screening_epochs_=screening_epochs, differential_privacy_=differential_privacy, 
+                                            target_epsilon_=target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
+                # Generate
+                if condition is not None:
+                    est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, 
+                                                                             feat_types_dict, n_generated_dataset, n_generated_sample=data.shape[0], 
+                                                                             from_prior=gen_from_prior, condition=condition)
+                    scores = _evaluate_generation(est_data_gen_transformed, cond_full_data_loader, metrics_list, columns)
+                else:
+                    data_no_encoded = data_processing.discrete_variables_transformation(data, feat_types_dict)
+                    df_no_encoded = pd.DataFrame(data_no_encoded.numpy(), columns=columns)
+                    df_no_encoded["treatment"] = 0
+                    full_data_loader = SurvivalAnalysisDataLoader(df_no_encoded, target_column = "censor", time_to_event_column = "time")
+                    n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
+                    est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
+                                                                   feat_types_dict, n_generated_dataset=n_generated_dataset, 
+                                                                   n_generated_sample=n_gen_sample, from_prior=gen_from_prior, diffuse=diffuse)
+                    scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
+                    
+            # ----------------------------------------------------------
+            # METHOD: train_train_gen_full
+            # ----------------------------------------------------------
+            elif method == 'train_train_gen_full':
+                # Train-test split on control
+                train_test_share = .8
+                n_samples = data.shape[0]
+                n_train_samples = int(train_test_share * n_samples)
+                train_index = np.random.choice(n_samples, n_train_samples, replace=False)
+                test_index = [i for i in np.arange(n_samples) if i not in train_index]
+                train_data, test_data = data[train_index], data[test_index]
+                train_miss_mask, train_true_miss_mask = miss_mask[train_index], true_miss_mask[train_index]
+
+                # Train
+                batch_size = params["batch_size"]
+                batch_size = min(batch_size, train_data.shape[0])
+                model_hivae = model_loading(input_dim=data.shape[1],
+                                            z_dim=params["z_dim"],
+                                            y_dim=params["y_dim"],
+                                            s_dim=params["s_dim"],
+                                            y_dim_partition=None,
+                                            feat_types_dict=feat_types_dict,
+                                            intervals_surv_piecewise=intervals,
+                                            n_layers_surv_piecewise=n_layers)
+                model_hivae, lv = _screen_train(trial, do_prune, model_hivae, train_data, train_miss_mask, train_true_miss_mask, 
+                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode, 
+                                            screening_epochs_=screening_epochs, differential_privacy_=differential_privacy, 
+                                            target_epsilon_=target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
+                # Generate
+                if condition is not None:
+                    est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, 
+                                                                             feat_types_dict, n_generated_dataset, n_generated_sample=data.shape[0], 
+                                                                             from_prior=gen_from_prior, condition=condition)
+                    scores = _evaluate_generation(est_data_gen_transformed, cond_full_data_loader, metrics_list, columns)
+                else:
+                    data_no_encoded = data_processing.discrete_variables_transformation(data, feat_types_dict)
+                    df_no_encoded = pd.DataFrame(data_no_encoded.numpy(), columns=columns)
+                    df_no_encoded["treatment"] = 0
+                    full_data_loader = SurvivalAnalysisDataLoader(df_no_encoded, target_column = "censor", time_to_event_column = "time")
+                    n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
+                    est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, 
+                                                                   feat_types_dict, n_generated_dataset=n_generated_dataset, 
+                                                                   n_generated_sample=data.shape[0], from_prior=gen_from_prior, diffuse=diffuse)
+                    scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
+
+            # # ----------------------------------------------------------
+            # # METHOD: train_train_gen_test
+            # # ----------------------------------------------------------
+            # elif method == 'train_train_gen_test':
+            #     # Train-test split on control
+            #     train_test_share = .8
+            #     n_samples = data.shape[0]
+            #     n_train_samples = int(train_test_share * n_samples)
+            #     train_index = np.random.choice(n_samples, n_train_samples, replace=False)
+            #     test_index = [i for i in np.arange(n_samples) if i not in train_index]
+            #     train_data, test_data = data[train_index], data[test_index]
+            #     df_test_data = df.iloc[test_index]
+            #     test_data_no_encoded = data_processing.discrete_variables_transformation(df_test_data.values, feat_types_dict)
+            #     test_df_no_encoded = pd.DataFrame(test_data_no_encoded.numpy(), columns=columns)
+            #     test_df_no_encoded["treatment"] = 0
+            #     test_data_loader = SurvivalAnalysisDataLoader(test_df_no_encoded, target_column = "censor", time_to_event_column = "time")
+            #     train_miss_mask, test_miss_mask = miss_mask[train_index], miss_mask[test_index]
+            #     train_true_miss_mask, test_true_miss_mask = true_miss_mask[train_index], true_miss_mask[test_index]
+
+            #     # Train
+            #     batch_size = params["batch_size"]
+            #     batch_size = min(batch_size, train_data.shape[0])
+            #     model_hivae = model_loading(input_dim=data.shape[1],
+            #                                 z_dim=params["z_dim"],
+            #                                 y_dim=params["y_dim"],
+            #                                 s_dim=params["s_dim"],
+            #                                 y_dim_partition=None,
+            #                                 feat_types_dict=feat_types_dict,
+            #                                 intervals_surv_piecewise=intervals,
+            #                                 n_layers_surv_piecewise=n_layers)
+            #     model_hivae, lv = _screen_train(trial, do_prune, model_hivae, train_data, train_miss_mask, train_true_miss_mask, 
+            #                                 feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode, 
+            #                                 screening_epochs_=screening_epochs, differential_privacy_=differential_privacy, 
+            #                                 target_epsilon_=target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
+            #     # Generate
+            #     if condition is not None:
+            #         raise NotImplementedError("Condition not implemented for this method")
+            #     else:
+            #         est_data_gen_transformed = generate_from_HIVAE(model_hivae, test_data, test_miss_mask, test_true_miss_mask, 
+            #                                                        feat_types_dict, n_generated_dataset=n_generated_dataset, 
+            #                                                        n_generated_sample=test_data.shape[0], from_prior=gen_from_prior, diffuse=diffuse)
+            #         scores = _evaluate_generation(est_data_gen_transformed, test_data_loader, metrics_list, columns)
+            else:
+                raise ValueError(f"Invalid method: '{method}'")
+
+            print(f"Scores: {scores}")
+
+        except optuna.TrialPruned:
+            raise
+        except Exception as e:  # invalid set of params
+            print(f"{type(e).__name__}: {e}")
+            print(params)
+            if isinstance(e, ValueError) and "invalid values" in str(e).lower():
+                raise optuna.exceptions.TrialPruned()
+            raise
+        # Return a tuple for multi-objective, a scalar for single-objective.
+        return tuple(scores) if is_multi_objective else scores[0]
+
+    db_file = study_name + '.db'
+    if os.path.exists(db_file):
+        print("This optuna study ({}) already exists. We load the study from the existing file.".format(db_file))
+        if do_prune:
+            pruner = optuna.pruners.MedianPruner(n_startup_trials=n_startup_trials)
+            study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db', pruner=pruner)
+        else:
+            study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db')
+    else:
+        create_kwargs = dict(
+            study_name=study_name,
+            storage=f'sqlite:///{db_file}',
+        )
+        if is_multi_objective:
+            create_kwargs["directions"] = ["minimize"] * len(metrics_list)
+            create_kwargs["sampler"] = optuna.samplers.NSGAIISampler(seed=seed)
+        else:
+            if do_prune:
+                create_kwargs["pruner"] = optuna.pruners.MedianPruner(n_startup_trials=n_startup_trials)
+            create_kwargs["direction"] = "minimize"
+            create_kwargs["sampler"] = optuna.samplers.TPESampler(seed=seed)
+        study = optuna.create_study(**create_kwargs)
+
+        if "HI-VAE_piecewise" in generator_name:
+            default_params = {"lr": 1e-3, "batch_size": 32, "z_dim": 20, "y_dim": 15, "s_dim": 20, "n_layers_surv_piecewise": 1, "n_intervals": 10}
+        else:
+            default_params = {"lr": 1e-3, "batch_size": 32, "z_dim": 20, "y_dim": 15, "s_dim": 20}
+        if differential_privacy:
+            default_params["max_grad_norm"] = 1.0
+            default_params["epochs"] = 1000
+        if tune_params is not None:
+            default_params = {k: v for k, v in default_params.items() if k in tune_params}
+        study.enqueue_trial(default_params)
+        print("Enqueued trial:", study.get_trials(deepcopy=False))
+
+    study.optimize(objective, n_trials=n_trials)
+    
+    if is_multi_objective:
+        best_trials = study.best_trials  # Pareto front
+        pareto = [{"params": t.params, "values": t.values} for t in best_trials]
+        best_to_return = pareto
+        print(f"Pareto front: {len(best_trials)} trials")
+    else:
+        best_params = study.best_params
+        best_to_return = best_params
+
+    return best_to_return, study
+
+
+
+def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_types_dict, n_splits, n_trials, generator_name, study_name='optuna_study_surv_hivae', 
+                                            seed=10, target_epsilon=None, target_delta=1e-5, tune_params=None, fixed_params=None, norm_mode="global",
+                                            screening_epochs=800, n_startup_trials=20, differential_privacy=False, do_prune=False):
+    """
+        Perform hyperparameter search for HIVAE using Optuna.
+        HPO METHOD: val_loss
+        Use the final validation loss directly — no generation step.
+    """
+    # differential_privacy = "_DP" in generator_name
+    if differential_privacy and target_epsilon is None:
+        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
+
+    _validate_norm_mode(norm_mode, differential_privacy=differential_privacy)
+    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params)
+
+    model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
  
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
@@ -740,203 +1027,25 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
         model_loading = getattr(importlib.import_module("src"), model_name)
         data = torch.from_numpy(df.values)
 
-        def _screen_train(model, data_, miss_, true_miss_, batch_size, differential_privacy_, target_epsilon_, target_delta_, max_grad_norm_, split_seed=seed):
-            # Train `model` with optional MedianPruner screening. When pruning is active and screening_epochs < epochs, train a screening chunk, 
-            # report its validation loss / maybe prune, then train the remaining epochs from the screening weights.
-            # numpy is reseeded before each chunk so the two chunks share train_HIVAE's internal train/val split.
-            if do_prune and screening_epochs < epochs:
-                np.random.seed(split_seed)
-                model, _, lv = train_HIVAE(model, data_, miss_, true_miss_, feat_types_dict, 
-                                           batch_size, params["lr"], screening_epochs, norm_mode=norm_mode, 
-                                            differential_privacy=differential_privacy_, target_epsilon=target_epsilon_, 
-                                            target_delta=target_delta_, max_grad_norm=max_grad_norm_)
-                _report_and_maybe_prune(trial, [_last_finite_val_loss(lv)], screening_epochs)
-                np.random.seed(split_seed)
-                model, _, _ = train_HIVAE(model, data_, miss_, true_miss_, feat_types_dict,
-                                            batch_size, params["lr"], epochs - screening_epochs,
-                                            norm_mode=norm_mode, start_epoch=screening_epochs,
-                                            differential_privacy=differential_privacy_, target_epsilon=target_epsilon_, 
-                                            target_delta=target_delta_, max_grad_norm=max_grad_norm_)
-            else:
-                model, _, _ = train_HIVAE(model, data_, miss_, true_miss_, feat_types_dict,
-                                            batch_size, params["lr"], epochs, norm_mode=norm_mode, 
-                                            differential_privacy=differential_privacy_, target_epsilon=target_epsilon_, 
-                                            target_delta=target_delta_, max_grad_norm=max_grad_norm_)
-            return model
-
-        scores = []
+        score = None
         try:
-            if method == 'train_full_gen_full':
-
-                full_data_loader = SurvivalAnalysisDataLoader(df, target_column = "censor", time_to_event_column = "time")
-                # Train
-                batch_size = params["batch_size"]
-                batch_size = min(batch_size, int(0.9*data.shape[0]))
-                model_hivae = model_loading(input_dim=data.shape[1],
-                            z_dim=params["z_dim"],
-                            y_dim=params["y_dim"],
-                            s_dim=params["s_dim"],
-                            y_dim_partition=None,
-                            feat_types_dict=feat_types_dict,
-                            intervals_surv_piecewise=intervals,
-                            n_layers_surv_piecewise=n_layers)
-
-                model_hivae = _screen_train(model_hivae, data, miss_mask, true_miss_mask, batch_size, differential_privacy, target_epsilon, target_delta, max_grad_norm)
-                # Generate
-                if condition is not None:
-                    est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask,
-                                                                            feat_types_dict, n_generated_dataset, n_generated_sample=data.shape[0], from_prior=gen_from_prior, condition=condition)
-
-                    tensor_list = list(est_data_gen_transformed)
-                    full_data_tensor = torch.cat(tensor_list, dim=0)
-                    df_gen_data = pd.DataFrame(full_data_tensor.numpy(), columns=columns)
-                    df_gen_data["time"] = df_gen_data["time"].clip(lower=1e-6)
-                    gen_data = SurvivalAnalysisDataLoader(df_gen_data, target_column="censor", time_to_event_column="time")
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=cond_full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
-                else:
-                    n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
-                    est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
-                                                                feat_types_dict, n_generated_dataset=n_generated_dataset, n_generated_sample=n_gen_sample, from_prior=gen_from_prior)
-                
-                    tensor_list = list(est_data_gen_transformed)
-                    full_data_tensor = torch.cat(tensor_list, dim=0)
-                    df_gen_data = pd.DataFrame(full_data_tensor.numpy(), columns=columns)
-                    df_gen_data["time"] = df_gen_data["time"].clip(lower=1e-6)
-                    gen_data = SurvivalAnalysisDataLoader(df_gen_data, target_column="censor", time_to_event_column="time")
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
-                scores = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-
-            elif method == 'train_train_gen_full':
-                # Train-test split on control
-                train_test_share = .8
-                n_samples = data.shape[0]
-                n_train_samples = int(train_test_share * n_samples)
-                train_index = np.random.choice(n_samples, n_train_samples, replace=False)
-                test_index = [i for i in np.arange(n_samples) if i not in train_index]
-
-                train_data, test_data = data[train_index], data[test_index]
-                train_miss_mask = miss_mask[train_index]
-                train_true_miss_mask = true_miss_mask[train_index]
-
-                full_data_loader = SurvivalAnalysisDataLoader(df, target_column = "censor", time_to_event_column = "time")
-
-                # Train
-                batch_size = params["batch_size"]
-                batch_size = min(batch_size, train_data.shape[0])
-                model_hivae = model_loading(input_dim=data.shape[1],
-                            z_dim=params["z_dim"],
-                            y_dim=params["y_dim"],
-                            s_dim=params["s_dim"],
-                            y_dim_partition=None,
-                            feat_types_dict=feat_types_dict,
-                            intervals_surv_piecewise=intervals,
-                            n_layers_surv_piecewise=n_layers)
-                model_hivae = _screen_train(model_hivae, data, miss_mask, true_miss_mask, batch_size, differential_privacy, target_epsilon, target_delta, max_grad_norm)
-                # Generate
-                if condition is not None:
-                    est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask,
-                                                                            feat_types_dict, n_generated_dataset, n_generated_sample=data.shape[0], from_prior=gen_from_prior, condition=condition)
-                    tensor_list = list(est_data_gen_transformed)
-                    full_data_tensor = torch.cat(tensor_list, dim=0)
-                    df_gen_data = pd.DataFrame(full_data_tensor.numpy(), columns=columns)
-                    df_gen_data["time"] = df_gen_data["time"].clip(lower=1e-6)
-                    gen_data = SurvivalAnalysisDataLoader(df_gen_data, target_column="censor", time_to_event_column="time")
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=cond_full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis',
-                                                    use_cache=True)
-                else:
-                    n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
-                    est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
-                                                                feat_types_dict, n_generated_dataset=n_generated_dataset, n_generated_sample=data.shape[0], from_prior=gen_from_prior)
-                    tensor_list = list(est_data_gen_transformed)
-                    full_data_tensor = torch.cat(tensor_list, dim=0)
-                    df_gen_data = pd.DataFrame(full_data_tensor.numpy(), columns=columns)
-                    df_gen_data["time"] = df_gen_data["time"].clip(lower=1e-6)
-                    gen_data = SurvivalAnalysisDataLoader(df_gen_data, target_column="censor", time_to_event_column="time")
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
-                scores = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-
-            elif method == 'train_train_gen_test':
-                # Train-test split on control
-                train_test_share = .8
-                n_samples = data.shape[0]
-                n_train_samples = int(train_test_share * n_samples)
-                train_index = np.random.choice(n_samples, n_train_samples, replace=False)
-                test_index = [i for i in np.arange(n_samples) if i not in train_index]
-
-                train_data, test_data = data[train_index], data[test_index]
-                df_test_data = df.iloc[test_index]
-                test_data_loader = SurvivalAnalysisDataLoader(df_test_data, target_column = "censor", time_to_event_column = "time")
-                train_miss_mask, test_miss_mask = miss_mask[train_index], miss_mask[test_index]
-                train_true_miss_mask, test_true_miss_mask = true_miss_mask[train_index], true_miss_mask[test_index]
-
-                # Train
-                batch_size = params["batch_size"]
-                batch_size = min(batch_size, train_data.shape[0])
-                model_hivae = model_loading(input_dim=data.shape[1],
-                            z_dim=params["z_dim"],
-                            y_dim=params["y_dim"],
-                            s_dim=params["s_dim"],
-                            y_dim_partition=None,
-                            feat_types_dict=feat_types_dict,
-                            intervals_surv_piecewise=intervals,
-                            n_layers_surv_piecewise=n_layers)
-                model_hivae = _screen_train(model_hivae, data, miss_mask, true_miss_mask, batch_size, differential_privacy, target_epsilon, target_delta, max_grad_norm)
-                # Generate
-                if condition is not None:
-                    raise NotImplementedError("Condition not implemented for this method")
-                else:
-                    est_data_gen_transformed = generate_from_HIVAE(model_hivae, test_data, test_miss_mask, test_true_miss_mask,
-                                                                feat_types_dict, n_generated_dataset=n_generated_dataset, n_generated_sample=test_data.shape[0], from_prior=gen_from_prior)
-                    tensor_list = list(est_data_gen_transformed)
-                    full_data_tensor = torch.cat(tensor_list, dim=0)
-                    df_gen_data = pd.DataFrame(full_data_tensor.numpy(), columns=columns)
-                    df_gen_data["time"] = df_gen_data["time"].clip(lower=1e-6)
-                    gen_data = SurvivalAnalysisDataLoader(df_gen_data, target_column="censor", time_to_event_column="time")
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=test_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
-                scores = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-            else:
-                raise ValueError("Invalid method")
-            
-            print(f"Score: {np.mean(scores)}")
+            train_val_share = .8
+            batch_size = params["batch_size"]
+            batch_size = min(batch_size, int(train_val_share * data.shape[0]))
+            model_hivae = model_loading(input_dim=data.shape[1],
+                        z_dim=params["z_dim"],
+                        y_dim=params["y_dim"],
+                        s_dim=params["s_dim"],
+                        y_dim_partition=None,
+                        feat_types_dict=feat_types_dict,
+                        intervals_surv_piecewise=intervals,
+                        n_layers_surv_piecewise=n_layers)
+            model_hivae, lv = _screen_train(trial, do_prune, model_hivae, data, miss_mask, true_miss_mask, 
+                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode, 
+                                            screening_epochs, differential_privacy, target_epsilon, target_delta,
+                                            max_grad_norm, split_seed=seed, train_val_share=train_val_share)
+            score = _last_finite_val_loss(lv)
+            print(f"Score: {score}")
         except optuna.TrialPruned:
             raise
         except Exception as e:  # invalid set of params
@@ -945,22 +1054,28 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
             if isinstance(e, ValueError) and "invalid values" in str(e).lower():
                 raise optuna.exceptions.TrialPruned()
             raise
-        return np.mean(scores)
+        return score
 
-
-    pruner = _make_pruner(generator_name, n_startup_trials)
     db_file = study_name + '.db'
     if os.path.exists(db_file):
         print("This optuna study ({}) already exists. We load the study from the existing file.".format(db_file))
-        study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db', pruner=pruner)
+        if do_prune:
+            pruner = optuna.pruners.MedianPruner(n_startup_trials=n_startup_trials)
+            study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db', pruner=pruner)
+        else:
+            study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db')
     else:
         sampler = optuna.samplers.TPESampler(seed=seed)
-        study = optuna.create_study(direction="minimize", study_name=study_name, storage='sqlite:///'+study_name+'.db', sampler=sampler, pruner=pruner)
+        if do_prune:
+            pruner = optuna.pruners.MedianPruner(n_startup_trials=n_startup_trials)
+            study = optuna.create_study(direction="minimize", study_name=study_name, storage='sqlite:///'+study_name+'.db', sampler=sampler, pruner=pruner)
+        else:
+            study = optuna.create_study(direction="minimize", study_name=study_name, storage='sqlite:///'+study_name+'.db', sampler=sampler)
         if "HI-VAE_piecewise" in generator_name:
             default_params = {"lr": 1e-3, "batch_size": 32, "z_dim": 20, "y_dim": 15, "s_dim": 20, "n_layers_surv_piecewise": 1, "n_intervals": 10}
         else:
             default_params = {"lr": 1e-3, "batch_size": 32, "z_dim": 20, "y_dim": 15, "s_dim": 20}
-        if "_DP" in generator_name:
+        if differential_privacy:
             default_params["max_grad_norm"] = 1.0
             default_params["epochs"] = 1000
         if tune_params is not None:
@@ -972,3 +1087,6 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
 
     return study.best_params, study
 
+
+def optuna_hyperparameter_search_Diffuse_loss():
+    raise NotImplementedError("HPO of Diffuse part using validation loss is not implemented yet.")

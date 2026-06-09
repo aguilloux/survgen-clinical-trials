@@ -479,3 +479,32 @@ def replicability_ext(data_init, data_syn, generator):
         score_df.loc[len(score_df)] = [generator, m] + np.array(res).mean(axis=0).tolist()
 
     return score_df
+
+
+def map_metrics_HPO(metrics_list):
+    expected_metrics = {
+            "stats.jensenshannon_dist.marginal": "min",
+            "stats.ks_test.marginal": "max",
+            "stats.survival_km_distance.abs_optimism": "min",
+            "detection.detection_xgb.mean": "min",
+            "sanity.nearest_syn_neighbor_distance.mean": "max",
+            "privacy.k-map.score": "max",
+            "privacy.identifiability_score.score": "min"
+        }
+    short_to_full = {k.split(".")[1]: k for k in expected_metrics}
+    metrics_synthcity = []
+    for metric in metrics_list:
+        if metric not in short_to_full:
+            raise ValueError(f"Unexpected metric: {metric}. Expected one of: {list(short_to_full.keys())}")
+        metrics_synthcity.append(short_to_full[metric])
+    metrics_dict_evaluation = {}
+    for metric in metrics_synthcity:
+        if metric.startswith("stats."):
+            metrics_dict_evaluation.setdefault("stats", []).append(metric.split(".")[1])
+        elif metric.startswith("detection."):
+            metrics_dict_evaluation.setdefault("detection", []).append(metric.split(".")[1])
+        elif metric.startswith("sanity."):
+            metrics_dict_evaluation.setdefault("sanity", []).append(metric.split(".")[1])
+        elif metric.startswith("privacy."):
+            metrics_dict_evaluation.setdefault("privacy", []).append(metric.split(".")[1])
+    return metrics_dict_evaluation, metrics_synthcity, expected_metrics

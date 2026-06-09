@@ -118,6 +118,33 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         est_data_gen_transformed_survae = generate_survae(model_survae, n_generated_dataset, n_generated_sample, target_column, time_to_event_column, condition)
     
         return est_data_gen_transformed_survae
+    
+def _evaluate_generation(gen_data, ref_loader, metrics_list):
+    metrics_dict_evaluation, metrics_synthcity, expected_metrics = metrics.map_metrics_HPO(metrics_list)
+    clear_cache()
+    evaluation = Metrics().evaluate(
+        X_gt=ref_loader,
+        X_syn=gen_data,
+        reduction='mean',
+        n_histogram_bins=10,
+        # n_folds=1,
+        metrics=metrics_dict_evaluation,
+        task_type='survival_analysis',
+        use_cache=True,
+    )
+    scores = []
+    for metric in metrics_synthcity:
+        if metric in evaluation.T.columns:
+            if expected_metrics[metric] == "max":
+                val = - evaluation.T[[metric]].T["mean"].values[0]
+            else:
+                val = evaluation.T[[metric]].T["mean"].values[0]
+            print(f"{metric}: {val:.4f}")
+        else:
+            val = np.nan
+            print(f"Warning: metric '{metric}' not found in evaluation results. Using NaN as fallback.")
+        scores.append(val)
+    return scores
    
 
 def optuna_hyperparameter_search(data, columns, target_column, time_to_event_column, n_generated_dataset, n_splits, n_trials, n_generated_sample=None, study_name='optuna_study_survae', metric='survival_km_distance', method='', condition=None, cond_df=None, seed=10):
@@ -125,6 +152,10 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
     df = pd.DataFrame(data.numpy(), columns=columns) # Preprocessed dataset
     if condition is not None and cond_df is not None:
         cond_full_data_loader =  SurvivalAnalysisDataLoader(cond_df, target_column = "censor", time_to_event_column = "time")
+
+    metrics_list = metric if isinstance(metric, list) else [metric]
+    print(f"Metrics for optimization: {metrics_list}")
+    is_multi_objective = len(metrics_list) > 1
  
     def objective(trial: optuna.Trial):
         set_seed()
@@ -151,15 +182,7 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                     # clear_cache()
 
                     gen_data = run_with_timeout_mp(model_survae, params, full_data_loader, n_gen_sample*n_generated_dataset, timeout=120)
-                   
-                    evaluation = Metrics().evaluate(X_gt=full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
+                    scores = _evaluate_generation(gen_data, full_data_loader, metrics_list)
                 else:
                     est_data_gen_transformed_survae = []
                     gen_shape = 0
@@ -177,18 +200,8 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                         i += 1
 
                     gen_data = SurvivalAnalysisDataLoader(est_data_gen_transformed_survae[0][:condition['n_samples']*n_generated_dataset], target_column=target_column, time_to_event_column=time_to_event_column)
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=cond_full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
-
-                scores = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-
+                    scores = _evaluate_generation(gen_data, cond_full_data_loader, metrics_list)
+                    
             elif method == 'train_train_gen_full':
                 train_test_share = .8
                 n_samples = data.shape[0]
@@ -206,19 +219,9 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                 if condition is None:
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
                     gen_data = model_survae_trial.generate(count=n_gen_sample*n_generated_dataset)
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=full_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
+                    scores = _evaluate_generation(gen_data, full_data_loader, metrics_list)
                 else:
                     raise NotImplementedError("Conditioning not implemented for method=train_train_gen_full")
-                
-                scores = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
 
             elif method == 'train_train_gen_test':
                 train_test_share = .8
@@ -237,85 +240,27 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                 if condition is None:
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else test_data.shape[0]
                     gen_data = model_survae_trial.generate(count=n_gen_sample*n_generated_dataset)
-                    clear_cache()
-                    evaluation = Metrics().evaluate(X_gt=test_data_loader, # can be dataloaders or dataframes
-                                                    X_syn=gen_data, 
-                                                    reduction='mean', # default mean
-                                                    n_histogram_bins=10, # default 10
-                                                    n_folds=1,
-                                                    metrics={'stats': ['survival_km_distance']},
-                                                    task_type='survival_analysis', 
-                                                    use_cache=True)
+                    scores = _evaluate_generation(gen_data, test_data_loader, metrics_list)
                 else:
                     raise NotImplementedError("Conditioning not implemented for method=train_train_gen_test")
-                
-                scores = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
 
             else:
                 raise ValueError("Method not recognized. Choose among 'train_full_gen_full', 'train_train_gen_full', 'train_train_gen_test'")
             
-                # # k-fold cross-validation
-                # kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
-                # for train_index, test_index in kf.split(df):
-                #     train_data, test_data = df.iloc[train_index], df.iloc[test_index]
-                #     train_data_loader = SurvivalAnalysisDataLoader(train_data, target_column=target_column, time_to_event_column=time_to_event_column)
-                #     test_data_loader = SurvivalAnalysisDataLoader(test_data, target_column=target_column, time_to_event_column=time_to_event_column)
-                #     full_data_loader = SurvivalAnalysisDataLoader(df, target_column=target_column, time_to_event_column=time_to_event_column)
-                #     model_survae_trial = model_survae(**params)
-                    
-                #     if method == 'train_train_gen_full':
-                #         # train on train data
-                #         model_survae_trial.fit(train_data_loader)
-                #         score_k = []
-                #         for j in range(n_generated_dataset):
-                #             # generate as many data as in the all dataset
-                #             gen_data = model_survae_trial.generate(count=df.shape[0])
-                #             df_gen_data = gen_data.dataframe()
-                #             if metric == 'log_rank_test':
-                #                 score_kj = metrics.compute_logrank_test(df, df_gen_data)
-                #             else: # 'survival_km_distance'
-                #                 clear_cache()
-                #                 evaluation = Metrics().evaluate(X_gt=full_data_loader, # can be dataloaders or dataframes
-                #                                                 X_syn=gen_data, 
-                #                                                 reduction='mean', # default mean
-                #                                                 n_histogram_bins=10, # default 10
-                #                                                 n_folds=1,
-                #                                                 metrics={'stats': ['survival_km_distance']},
-                #                                                 task_type='survival_analysis', 
-                #                                                 use_cache=True)
-                #                 score_kj = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-                #             score_k.append(score_kj)
-                #     else:
-                #         # method ='train_train_gen_test':
-                #         # train on train data
-                #         model_survae_trial.fit(train_data_loader)
-                #         score_k = []
-                #         for j in range(n_generated_dataset):
-                #             # generate as many data as in the test set
-                #             gen_data = model_survae_trial.generate(count=test_data.shape[0])
-                #             df_gen_data = gen_data.dataframe()
-                #             if metric == 'log_rank_test':
-                #                 score_kj = metrics.compute_logrank_test(test_data, df_gen_data)
-                #             else: # 'survival_km_distance'
-                #                 clear_cache()
-                #                 evaluation = Metrics().evaluate(X_gt=test_data_loader, # can be dataloaders or dataframes
-                #                                                 X_syn=gen_data, 
-                #                                                 reduction='mean', # default mean
-                #                                                 n_histogram_bins=10, # default 10
-                #                                                 n_folds=1,
-                #                                                 metrics={'stats': ['survival_km_distance']},
-                #                                                 task_type='survival_analysis', 
-                #                                                 use_cache=True)
-                #                 score_kj = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-                #             score_k.append(score_kj)
-                        
-                #     scores.append(np.mean(score_k))
-            print(f"Score: {np.mean(scores)}")
+            print(f"Scores: {scores}")
+        # except Exception as e:  # invalid set of params
+        #     print(f"{type(e).__name__}: {e}")
+        #     print(params)
+        #     raise optuna.TrialPruned()
+        except optuna.TrialPruned:
+            raise
         except Exception as e:  # invalid set of params
             print(f"{type(e).__name__}: {e}")
             print(params)
-            raise optuna.TrialPruned()
-        return np.mean(scores)
+            if isinstance(e, ValueError) and "invalid values" in str(e).lower():
+                raise optuna.exceptions.TrialPruned()
+            raise
+        return tuple(scores) if is_multi_objective else scores[0]
 
     
     db_file = study_name + '.db'
@@ -323,8 +268,18 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
         print("This optuna study ({}) already exists. We load the study from the existing file.".format(db_file))
         study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db')
     else: 
-        sampler = optuna.samplers.TPESampler(seed=seed)
-        study = optuna.create_study(direction="minimize", study_name=study_name, storage='sqlite:///'+study_name+'.db', sampler=sampler)
+        create_kwargs = dict(
+            study_name=study_name,
+            storage=f'sqlite:///{db_file}',
+        )
+        if is_multi_objective:
+            create_kwargs["directions"] = ["minimize"] * len(metrics_list)
+            create_kwargs["sampler"] = optuna.samplers.NSGAIISampler(seed=seed)
+        else:
+            create_kwargs["direction"] = "minimize"
+            create_kwargs["sampler"] = optuna.samplers.TPESampler(seed=seed)
+        study = optuna.create_study(**create_kwargs)
+
         default_params = {'n_iter': 1000, 
                           'lr': 1e-3, 
                           'decoder_n_layers_hidden': 3, 
@@ -341,9 +296,17 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
         study.enqueue_trial(default_params)
         print("Enqueued trial:", study.get_trials(deepcopy=False))
     study.optimize(objective, n_trials=n_trials)
-    study.best_params  
 
-    return study.best_params, study
+    if is_multi_objective:
+        best_trials = study.best_trials  # Pareto front
+        pareto = [{"params": t.params, "values": t.values} for t in best_trials]
+        best_to_return = pareto
+        print(f"Pareto front: {len(best_trials)} trials")
+    else:
+        best_params = study.best_params
+        best_to_return = best_params
+
+    return best_to_return, study
 
 
 def get_n_hyperparameters(generator_name):
