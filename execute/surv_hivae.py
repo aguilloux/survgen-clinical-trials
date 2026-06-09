@@ -324,7 +324,7 @@ def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat
 # GENERATION FUNCTIONS: without conditioning on a feature value.
 # ──────────────────────────────────────────────────────────────
  
-def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffuse=False):
+def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffusion=False, diffusion_params=None):
     """
         Generation from a trained HIVAE, without conditioning. 
         If `n_generated_sample` is specified, generation is performed on an extended dataset of that size (with samples drawn with replacement from the original data) 
@@ -371,8 +371,10 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
             samples_list.append(samples)
 
         else:
-            if diffuse:
-                vae_res = vae_model.diffuse_forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
+            if diffusion:
+                diffusion_kwargs = diffusion_params or {}
+                vae_res = vae_model.diffusion_forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
+                                                    **diffusion_kwargs)
             else:
                 vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
             samples_list.append(vae_res["samples"])
@@ -575,6 +577,8 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None):
         Otherwise, only those whose name appears in `tune_params` are kept.
     """
     n_samples = data.shape[0]
+    n_diffusion_step = 100
+    n_diffusion_samples = n_diffusion_step * n_samples
     hp_space = [
         CategoricalDistribution(name="lr", choices=[1e-4, 2e-4, 1e-3, 2e-3, 3e-3, 5e-3]),
         CategoricalDistribution(name="batch_size", choices=get_batchsize(n_samples, n_splits) + [32]),
@@ -589,6 +593,11 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None):
     if "_DP" in generator_name:
         hp_space.append(CategoricalDistribution(name="max_grad_norm", choices=[0.1, 0.3, 1.0, 3.0, 10.0]))
         hp_space.append(CategoricalDistribution(name="epochs", choices=[20, 50, 100, 200, 400, 1000]))
+
+    if "_diffusion" in generator_name:
+        hp_space.append(CategoricalDistribution(name="diffusion_lr", choices=[1e-4, 2e-4, 1e-3, 2e-3, 3e-3, 5e-3]))
+        hp_space.append(IntegerDistribution(name="diffusion_hidden_dim", low=10, high=200, step=10))
+        hp_space.append(CategoricalDistribution(name="diffusion_batch_size", choices=get_diffusion_batchsize(n_diffusion_samples) + [32]))
 
     if tune_params is not None:
         hp_space = [d for d in hp_space if d.name in tune_params]
@@ -619,6 +628,15 @@ def get_batchsize(n_samples, n_splits):
     """
     batch_size_ratio = [.15, .2, .25, .4, .6, .75]
     batch_size = [int(ratio * n_samples * (n_splits - 1) / n_splits) for ratio in batch_size_ratio]
+
+    return batch_size
+
+def get_diffusion_batchsize(n_samples):
+    """
+        Batch size
+    """
+    batch_size_ratio = [.15, .2, .25, .4, .6, .75]
+    batch_size = [int(ratio * n_samples) for ratio in batch_size_ratio]
 
     return batch_size
 
@@ -834,9 +852,12 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                     df_no_encoded["treatment"] = 0
                     full_data_loader = SurvivalAnalysisDataLoader(df_no_encoded, target_column = "censor", time_to_event_column = "time")
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
+                    if "_diffusion" in generator_name:
+                        valid_keys = {"diffusion_hidden_dim", "diffusion_batch_size", "diffusion_lr"}
+                        diffusion_params = {k: v for k, v in (params or {}).items() if k in valid_keys}
                     est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
-                                                                   n_generated_sample=n_gen_sample, from_prior=gen_from_prior, diffuse=diffuse)
+                                                                   n_generated_sample=n_gen_sample, from_prior=gen_from_prior, diffusion=diffusion, diffusion_params=diffusion_params)
                     scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
                     
             # ----------------------------------------------------------
