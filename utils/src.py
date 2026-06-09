@@ -179,7 +179,7 @@ class HIVAE(nn.Module):
             "q_params": q_params
         }
 
-    def diffuse_forward(
+    def diffusion_forward(
         self,
         batch_data_observed,
         batch_data,
@@ -189,6 +189,8 @@ class HIVAE(nn.Module):
         diffusion_hidden_dim: int = 256,
         diffusion_n_steps: int = 100,
         diffusion_n_epochs: int = 50,
+        diffusion_batch_size: int = 512,
+        diffusion_lr: float = 1e-3,
     ):
         """
         Encode → fit latent diffusion model → sample → decode.
@@ -217,13 +219,15 @@ class HIVAE(nn.Module):
             hidden_dim=diffusion_hidden_dim,
             n_steps=diffusion_n_steps,
             n_epochs=diffusion_n_epochs,
+            batch_size=diffusion_batch_size,
+            lr=diffusion_lr,
         )
         diffusion.fit(latents_np)
 
         # ── 3. Sample new latents & convert to torch ──────────────────
-        diffuse_samples = diffusion.sample(n_generated_sample)
-        samples["s"] = torch.tensor(np.array(diffuse_samples[:, : self.s_dim]), dtype=torch.float32)
-        samples["z"] = torch.tensor(np.array(diffuse_samples[:, self.s_dim :]), dtype=torch.float32)
+        diffusion_samples = diffusion.sample(n_generated_sample)
+        samples["s"] = torch.tensor(np.array(diffusion_samples[:, : self.s_dim]), dtype=torch.float32)
+        samples["z"] = torch.tensor(np.array(diffusion_samples[:, self.s_dim :]), dtype=torch.float32)
 
         # ── 4. Decode & compute loss ──────────────────────────────────
         p_params, log_p_x, log_p_x_missing, samples = self.decode(

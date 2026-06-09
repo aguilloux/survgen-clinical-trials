@@ -454,7 +454,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
         verbose=True, plot=False, gen_from_prior=False, condition=None, differential_privacy=False,
         norm_mode="global",
         seed=1,
-        target_epsilon=None, target_delta=1e-5, diffuse=False,
+        target_epsilon=None, target_delta=1e-5, diffusion=False,
         **hp_overrides):
     """
         End-to-end entry point: build a HIVAE, train it on `df`, and generate `n_generated_dataset` synthetic datasets.
@@ -513,7 +513,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
             if condition is not None:
                 est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, condition=condition)
             else:
-                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffuse=diffuse)
+                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
@@ -521,7 +521,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_
         if condition is not None:
             est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition)
         else:
-            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffuse=diffuse)
+            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion)
 
         if plot:
             loss_track = {"epoch": list(range(1, len(loss_train) + 1)),
@@ -780,7 +780,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                  target_epsilon=None, target_delta=1e-5,
                                  tune_params=None, fixed_params=None, norm_mode="global",
                                  screening_epochs=800, n_startup_trials=20, 
-                                 differential_privacy=False, diffuse=False, do_prune=False):
+                                 differential_privacy=False, diffusion=False, do_prune=False):
     
     # differential_privacy = "_DP" in generator_name
     if differential_privacy and target_epsilon is None:
@@ -902,7 +902,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
                     est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, 
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
-                                                                   n_generated_sample=data.shape[0], from_prior=gen_from_prior, diffuse=diffuse)
+                                                                   n_generated_sample=data.shape[0], from_prior=gen_from_prior, diffusion=diffusion)
                     scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
 
             # # ----------------------------------------------------------
@@ -945,7 +945,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
             #     else:
             #         est_data_gen_transformed = generate_from_HIVAE(model_hivae, test_data, test_miss_mask, test_true_miss_mask, 
             #                                                        feat_types_dict, n_generated_dataset=n_generated_dataset, 
-            #                                                        n_generated_sample=test_data.shape[0], from_prior=gen_from_prior, diffuse=diffuse)
+            #                                                        n_generated_sample=test_data.shape[0], from_prior=gen_from_prior, diffusion=diffusion)
             #         scores = _evaluate_generation(est_data_gen_transformed, test_data_loader, metrics_list, columns)
             else:
                 raise ValueError(f"Invalid method: '{method}'")
@@ -1109,5 +1109,5 @@ def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_
     return study.best_params, study
 
 
-def optuna_hyperparameter_search_Diffuse_loss():
-    raise NotImplementedError("HPO of Diffuse part using validation loss is not implemented yet.")
+def optuna_hyperparameter_search_diffusion_loss():
+    raise NotImplementedError("HPO of diffusion part using validation loss is not implemented yet.")
