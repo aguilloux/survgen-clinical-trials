@@ -188,7 +188,7 @@ class HIVAE(nn.Module):
         n_generated_dataset: int = 1,
         diffusion_hidden_dim: int = 256,
         diffusion_n_steps: int = 100,
-        diffusion_n_epochs: int = 50,
+        diffusion_n_epochs: int = 1000,
         diffusion_batch_size: int = 512,
         diffusion_lr: float = 1e-3,
     ):
