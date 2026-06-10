@@ -449,12 +449,10 @@ def _validate_norm_mode(norm_mode, differential_privacy):
         )
 
 
-def run(df, miss_mask, true_miss_mask, feat_types_dict,  n_generated_dataset, n_generated_sample=None,
-        params=None,
-        verbose=True, plot=False, gen_from_prior=False, condition=None, differential_privacy=False,
-        norm_mode="global",
-        seed=1,
-        target_epsilon=None, target_delta=1e-5, diffusion=False,
+def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
+        n_generated_sample=None, params=None, verbose=True, plot=False, 
+        gen_from_prior=False, condition=None, differential_privacy=False,
+        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False,
         **hp_overrides):
     """
         End-to-end entry point: build a HIVAE, train it on `df`, and generate `n_generated_dataset` synthetic datasets.
@@ -855,6 +853,8 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                     if "_diffusion" in generator_name:
                         valid_keys = {"diffusion_hidden_dim", "diffusion_batch_size", "diffusion_lr"}
                         diffusion_params = {k: v for k, v in (params or {}).items() if k in valid_keys}
+                    else:
+                        diffusion_params = {}
                     est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
                                                                    n_generated_sample=n_gen_sample, from_prior=gen_from_prior, diffusion=diffusion, diffusion_params=diffusion_params)
