@@ -57,17 +57,21 @@ class LatentDiffusion:
         latent_dim: int,
         hidden_dim: int = 256,
         n_steps: int = 100,
-        n_epochs: int = 50,
+        n_epochs: int = 1000,
         batch_size: int = 512,
         lr: float = 1e-3,
         seed: int = 0,
+        patience: int = 20,
+        min_delta: float = 1e-6,
     ):
         self.latent_dim = latent_dim
         self.n_steps = n_steps
         self.n_epochs = n_epochs
         self.batch_size = batch_size
+        self.patience = patience
+        self.min_delta = min_delta
 
-        beta = LinearSchedule(b_min=0.02, b_max=1.0, t0=0.0, T=10.0)
+        beta = LinearSchedule(b_min=0.02, b_max=1.0, t0=0.0, T=1.0)
         self.sde = SDE(beta=beta)
         self.timer = VpTimer(eps=1e-5, tf=self.sde.tf, n_steps=n_steps)
 
@@ -122,6 +126,11 @@ class LatentDiffusion:
         x, t, y = self._make_training_data(latents)
         n_total = x.shape[0]
 
+        # Early stopping state
+        best_loss = float('inf')
+        best_params = None
+        epochs_without_improvement = 0
+
         for epoch in range(self.n_epochs):
             self.key, perm_key = jax.random.split(self.key)
             perm = jax.random.permutation(perm_key, n_total)
@@ -132,8 +141,23 @@ class LatentDiffusion:
                 epoch_loss += self._train_step(x[idx], t[idx], y[idx])
                 n_batches += 1
 
+            avg_loss = epoch_loss / n_batches
+
             if verbose and epoch % 10 == 0:
-                print(f"  [diffusion] epoch {epoch:3d}  loss={epoch_loss / n_batches:.6f}")
+                print(f"  [diffusion] epoch {epoch:3d}  loss={avg_loss:.6f}  best={best_loss:.6f}  patience={epochs_without_improvement}/{self.patience}")
+
+            # Early stopping check
+            if avg_loss < best_loss - self.min_delta:
+                best_loss = avg_loss
+                best_params = nnx.state(self.network)   # snapshot best weights
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+                if epochs_without_improvement >= self.patience:
+                    if verbose:
+                        print(f"  [diffusion] early stopping at epoch {epoch}  best_loss={best_loss:.6f}")
+                    nnx.update(self.network, best_params)  # restore best weights
+                    break
 
         return self
 
