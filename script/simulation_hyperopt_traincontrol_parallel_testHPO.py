@@ -119,8 +119,8 @@ def run(generator_name):
 
     seed_HPO_list = [10,11,12]
     for seed_HPO in seed_HPO_list:
-        # optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(seed_data, seed_HPO)
-        optuna_version_name = "ValLoss_seedData{}_seedHPO{}".format(seed_data, seed_HPO)
+        optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(seed_data, seed_HPO)
+        # optuna_version_name = "ValLoss_seedData{}_seedHPO{}".format(seed_data, seed_HPO)
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
