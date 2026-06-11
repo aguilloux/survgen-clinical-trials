@@ -564,7 +564,7 @@ from synthcity.metrics.eval import Metrics
 from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader
 
 
-def hyperparameter_space(data, n_splits, generator_name, tune_params=None):
+def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_epsilon=False):
     """
         Define the hyperparameter space for the model
 
@@ -573,6 +573,10 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None):
 
         If `tune_params` is None (default), all available hyperparameters are tuned.
         Otherwise, only those whose name appears in `tune_params` are kept.
+
+        If `tune_epsilon` is True (DP only), the privacy budget `target_epsilon` is
+        added to the space as a categorical HP (choices [1, 2, 3, 5, 10]). When
+        False the space is identical to not searching epsilon at all.
     """
     n_samples = data.shape[0]
     n_diffusion_step = 100
@@ -591,6 +595,13 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None):
     if "_DP" in generator_name:
         hp_space.append(CategoricalDistribution(name="max_grad_norm", choices=[0.1, 0.3, 1.0, 3.0, 10.0]))
         hp_space.append(CategoricalDistribution(name="epochs", choices=[20, 50, 100, 200, 400, 1000]))
+
+    # When `tune_epsilon` is on, the DP privacy budget itself becomes a tuned HP.
+    # Named "target_epsilon" so it drops straight into the train_HIVAE arg of the
+    # same name (overriding the function-level target_epsilon per trial). When off,
+    # the space is identical to before — epsilon is simply not searched.
+    if tune_epsilon:
+        hp_space.append(CategoricalDistribution(name="target_epsilon", choices=[1, 2, 3, 5, 10]))
 
     if "_diffusion" in generator_name:
         hp_space.append(CategoricalDistribution(name="diffusion_lr", choices=[1e-4, 2e-4, 1e-3, 2e-3, 3e-3, 5e-3]))
@@ -638,7 +649,7 @@ def get_diffusion_batchsize(n_samples):
 
     return batch_size
 
-def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params, fixed_params):
+def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=False):
     """
         Fail fast (before any Optuna trial runs) if hyperparameters needed by the
         objective won't be available at trial time.
@@ -650,7 +661,7 @@ def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params,
         - When `tune_params` is given, every other HP in the space that isn't
         tuned must also be in `fixed_params`.
     """
-    full_hp_space = hyperparameter_space(data, n_splits, generator_name)
+    full_hp_space = hyperparameter_space(data, n_splits, generator_name, tune_epsilon=tune_epsilon)
     available = {d.name for d in full_hp_space}
     fixed_keys = set(fixed_params or {})
 
@@ -775,17 +786,22 @@ def _evaluate_generation(gen_data, ref_loader, metrics_list, columns):
 def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_splits, n_trials, 
                                  columns, generator_name, n_generated_sample = None, study_name='optuna_study_surv_hivae', 
                                  metric='survival_km_distance', method='', gen_from_prior=False, condition=None, cond_df=None, seed=10,
-                                 target_epsilon=None, target_delta=1e-5,
+                                 target_epsilon=None, target_delta=1e-5, tune_epsilon=False,
                                  tune_params=None, fixed_params=None, norm_mode="global",
                                  screening_epochs=800, n_startup_trials=20, 
                                  differential_privacy=False, diffusion=False, do_prune=False):
     
     # differential_privacy = "_DP" in generator_name
-    if differential_privacy and target_epsilon is None:
-        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
+    if tune_epsilon and not differential_privacy:
+        raise ValueError("tune_epsilon=True requires differential_privacy=True.")
+    if differential_privacy and target_epsilon is None and not tune_epsilon:
+        raise ValueError(
+            "target_epsilon must be set when differential_privacy=True "
+            "(unless tune_epsilon=True, which samples it as an HP)."
+        )
 
     _validate_norm_mode(norm_mode, differential_privacy=differential_privacy)
-    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params)
+    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=tune_epsilon)
 
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
     if condition is not None and cond_df is not None:
@@ -801,11 +817,14 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
 
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
-        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params)
+        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
         epochs = params["epochs"]
         max_grad_norm = params.get("max_grad_norm", None)
+        # When tune_epsilon is on, the sampled "target_epsilon" overrides the
+        # function-level target_epsilon for this trial; otherwise fall back to it.
+        trial_target_epsilon = params.get("target_epsilon", target_epsilon)
         if "HI-VAE_piecewise" in generator_name:
             intervals = get_intervals(df, params["n_intervals"])
             n_layers = params["n_layers_surv_piecewise"]
@@ -834,10 +853,10 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                             feat_types_dict=feat_types_dict,
                                             intervals_surv_piecewise=intervals,
                                             n_layers_surv_piecewise=n_layers)
-                model_hivae, lv = _screen_train(trial, do_prune, model_hivae, data, miss_mask, true_miss_mask, 
-                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode, 
-                                            screening_epochs_=screening_epochs, differential_privacy_=differential_privacy, 
-                                            target_epsilon_=target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
+                model_hivae, lv = _screen_train(trial, do_prune, model_hivae, data, miss_mask, true_miss_mask,
+                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode,
+                                            screening_epochs_=screening_epochs, differential_privacy_=differential_privacy,
+                                            target_epsilon_=trial_target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
                 # Generate
                 if condition is not None:
                     est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, 
@@ -884,10 +903,10 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                             feat_types_dict=feat_types_dict,
                                             intervals_surv_piecewise=intervals,
                                             n_layers_surv_piecewise=n_layers)
-                model_hivae, lv = _screen_train(trial, do_prune, model_hivae, train_data, train_miss_mask, train_true_miss_mask, 
-                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode, 
-                                            screening_epochs_=screening_epochs, differential_privacy_=differential_privacy, 
-                                            target_epsilon_=target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
+                model_hivae, lv = _screen_train(trial, do_prune, model_hivae, train_data, train_miss_mask, train_true_miss_mask,
+                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode_=norm_mode,
+                                            screening_epochs_=screening_epochs, differential_privacy_=differential_privacy,
+                                            target_epsilon_=trial_target_epsilon, target_delta_=target_delta, max_grad_norm_=max_grad_norm)
                 # Generate
                 if condition is not None:
                     est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, 
@@ -1014,7 +1033,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
 
 
 def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_types_dict, n_splits, n_trials, generator_name, study_name='optuna_study_surv_hivae', 
-                                            seed=10, target_epsilon=None, target_delta=1e-5, tune_params=None, fixed_params=None, norm_mode="global",
+                                            seed=10, target_epsilon=None, target_delta=1e-5, tune_epsilon=False, tune_params=None, fixed_params=None, norm_mode="global",
                                             screening_epochs=800, n_startup_trials=20, differential_privacy=False, do_prune=False):
     """
         Perform hyperparameter search for HIVAE using Optuna.
@@ -1022,21 +1041,29 @@ def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_
         Use the final validation loss directly — no generation step.
     """
     # differential_privacy = "_DP" in generator_name
-    if differential_privacy and target_epsilon is None:
-        raise ValueError("target_epsilon must be set when generator_name contains '_DP'.")
+    if tune_epsilon and not differential_privacy:
+        raise ValueError("tune_epsilon=True requires differential_privacy=True.")
+    if differential_privacy and target_epsilon is None and not tune_epsilon:
+        raise ValueError(
+            "target_epsilon must be set when differential_privacy=True "
+            "(unless tune_epsilon=True, which samples it as an HP)."
+        )
 
     _validate_norm_mode(norm_mode, differential_privacy=differential_privacy)
-    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params)
+    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=tune_epsilon)
 
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
- 
+
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
-        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params)
+        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
         epochs = params["epochs"]
         max_grad_norm = params.get("max_grad_norm", None)
+        # When tune_epsilon is on, the sampled "target_epsilon" overrides the
+        # function-level target_epsilon for this trial; otherwise fall back to it.
+        trial_target_epsilon = params.get("target_epsilon", target_epsilon)
         if "HI-VAE_piecewise" in generator_name:
             intervals = get_intervals(df, params["n_intervals"])
             n_layers = params["n_layers_surv_piecewise"]
@@ -1061,9 +1088,9 @@ def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_
                         feat_types_dict=feat_types_dict,
                         intervals_surv_piecewise=intervals,
                         n_layers_surv_piecewise=n_layers)
-            model_hivae, lv = _screen_train(trial, do_prune, model_hivae, data, miss_mask, true_miss_mask, 
-                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode, 
-                                            screening_epochs, differential_privacy, target_epsilon, target_delta,
+            model_hivae, lv = _screen_train(trial, do_prune, model_hivae, data, miss_mask, true_miss_mask,
+                                            feat_types_dict, batch_size, params["lr"], epochs, norm_mode,
+                                            screening_epochs, differential_privacy, trial_target_epsilon, target_delta,
                                             max_grad_norm, split_seed=seed, train_val_share=train_val_share)
             score = _last_finite_val_loss(lv)
             print(f"Score: {score}")
