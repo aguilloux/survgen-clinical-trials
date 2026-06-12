@@ -103,6 +103,7 @@ def run(MC_id):
 
     # optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(0, 10)
     optuna_version_name = "ValLoss_seedData{}_seedHPO{}".format(0, 10)
+    print("HPO version:", optuna_version_name)
 
     dataset_name = "Simulations_indep_traincontrol"
     current_path = os.getcwd()  # Get current working directory

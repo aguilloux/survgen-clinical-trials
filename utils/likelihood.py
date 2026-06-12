@@ -364,6 +364,7 @@ def loglik_surv_piecewise(batch_data, list_type, theta, normalization_params, n_
     eps = 1e-8
     breaks = torch.cat((torch.Tensor([interval[0] for interval in intervals]), torch.Tensor([intervals[-1][1]])))
     bin_idx = torch.bucketize(T_surv_scaled, breaks[1:], right=False).flatten()  # shape: (n,)
+    bin_idx = bin_idx.clamp(max=len(breaks) - 2)  # ensure bin_idx+1 stays in bounds
     t0 = breaks[bin_idx]         # left edge of interval
     t1 = breaks[bin_idx + 1]     # right edge
     bin_width = (t1 - t0).clamp(min=eps)  # avoid division by zero
