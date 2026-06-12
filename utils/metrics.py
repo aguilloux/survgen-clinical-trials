@@ -8,15 +8,21 @@ Created on Mon Feb 17 20:35:11 2025
 @author: Van Tuan NGUYEN
 """
 
+import tempfile
+import warnings
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+from numpy.linalg import LinAlgError
 
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from lifelines import CoxPHFitter
 
-from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader
+from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader, GenericDataLoader
 from synthcity.utils.reproducibility import clear_cache, enable_reproducible_results
 from synthcity.metrics.eval import Metrics
+from synthcity.metrics.eval_privacy import DomiasMIAKDE, DomiasMIAPrior, DomiasMIABNAF
 
 
 def compute_logrank_test(control, treat):
@@ -356,6 +362,220 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
     score_df["generator"] = generator
 
     return score_df
+
+
+_DOMIAS_VARIANTS = {
+    "KDE": DomiasMIAKDE,
+    "prior": DomiasMIAPrior,
+    "BNAF": DomiasMIABNAF,
+}
+
+
+def _run_domias_attack(variant, members, nonmembers, syn, ref_syn, reference_size, random_state, workspace):
+    """
+    Instantiate the requested DOMIAS evaluator and run it on a single, already
+    column-aligned split.
+
+    Calls the protected ``_evaluate`` directly instead of the public ``evaluate``: the latter
+    caches results keyed only on the hashes of ``X_gt`` and ``X_syn`` (see
+    ``PrivacyEvaluator.evaluate``), ignoring ``X_train`` and ``reference_size``, so across folds
+    it would silently return stale scores.
+
+    Returns:
+        dict: synthcity's raw DOMIAS output, with keys ``"accuracy"`` and ``"aucroc"``.
+    """
+    evaluator = _DOMIAS_VARIANTS[variant](
+        reduction="mean",
+        use_cache=False,
+        random_state=random_state,
+        workspace=workspace,
+    )
+    return evaluator._evaluate(
+        GenericDataLoader(nonmembers),   # X_gt          -> non-members (first k) + reference set (last k)
+        GenericDataLoader(syn),          # synth_set     -> synthetic sample
+        GenericDataLoader(members),      # X_train       -> members
+        GenericDataLoader(ref_syn),      # synth_val_set -> only used by BNAF
+        reference_size=reference_size,
+    )
+
+
+def membership_inference_attack(
+    data_members,
+    data_nonmembers,
+    data_syn,
+    data_ref_syn=None,
+    variant="KDE",
+    reference_size=30,
+    drop_constant=True,
+    fallback_to_bnaf=True,
+    random_state=0,
+    workspace=None,
+):
+    """
+    Run a DOMIAS membership inference attack (MIA) against a synthetic dataset.
+
+    DOMIAS (van Breugel et al., AISTATS 2023) detects generator overfitting by comparing,
+    for each real record, a density ratio p_synthetic(x) / p_reference(x). Records the
+    generator memorised (members) tend to score higher than fresh held-out records
+    (non-members); the attack's ability to separate the two is reported as an AUCROC.
+    AUCROC ~ 0.5 means the attacker cannot tell members from non-members (good privacy);
+    AUCROC -> 1.0 indicates membership leakage.
+
+    The attack needs three pieces of data that a plain real-vs-synthetic comparison
+    (e.g. general_metrics_modular) does not provide, which is why this lives in its own
+    function:
+        - members      : real rows the generator was trained on,
+        - non-members  : real rows held out from training (also sliced to build the
+                         reference set used for density estimation),
+        - synthetic    : data produced by the generator trained on ``members``.
+
+    Density estimator variants (``variant``):
+        - "KDE"   : gaussian_kde on the synthetic sample and on the reference slice. Fast,
+                    but gaussian_kde raises on singular covariance, which happens when a
+                    column is (near-)constant (e.g. an all-censored slice, or a collapsed
+                    binary column in the synthetic data).
+        - "prior" : gaussian_kde on the synthetic sample, analytic Gaussian as reference.
+                    Fast; shares the synthetic-side fragility of KDE.
+        - "BNAF"  : a normalizing-flow neural density estimator. Robust to degenerate /
+                    low-dimensional data, but ~100-1000x slower (it trains two small networks
+                    per call). Use this to run everything on BNAF regardless of column shape.
+
+    Robustness handling for the fast variants:
+        - ``drop_constant=True`` removes any non-continuous column that is constant in the data
+          gaussian_kde fits on (the synthetic sample and the reference slice). A constant column
+          carries no membership signal, so dropping it is information-free. Columns that are
+          (quasi-)continuous over the real data are never dropped (the reference density needs
+          at least one), so a degenerate continuous column falls through to the BNAF fallback.
+        - ``fallback_to_bnaf=True`` retries with BNAF if KDE/prior still fail numerically.
+
+    Args:
+        data_members (DataFrame): Real rows used to train the generator (the "members").
+        data_nonmembers (DataFrame): Held-out real rows (the "non-members"). Should contain at
+            least ``2 * reference_size`` rows: the first ``reference_size`` become test
+            non-members and the last ``reference_size`` become the density reference set, so the
+            two slices stay disjoint. ``reference_size`` is capped automatically (with a warning)
+            if there are too few rows.
+        data_syn (DataFrame): Synthetic data from the generator trained on ``data_members``.
+        data_ref_syn (DataFrame, optional): Reference/validation synthetic set used by BNAF to
+            fit the synthetic density. Ignored by KDE/prior. Defaults to ``data_syn``.
+        variant (str): "KDE" (default), "prior", or "BNAF".
+        reference_size (int): Size of each held-out slice (non-members and reference set).
+            Defaults to 30. Larger values give a more reliable AUCROC and make accidental
+            constant slices less likely, at the cost of a larger held-out set.
+        drop_constant (bool): Drop constant columns before density estimation. Defaults to True.
+        fallback_to_bnaf (bool): Retry with BNAF if KDE/prior fail numerically. Defaults to True.
+        random_state (int): Seed for the evaluator. Defaults to 0.
+        workspace (str or Path, optional): Scratch directory for synthcity. Defaults to a
+            temporary directory.
+
+    Returns:
+        dict: {
+            "aucroc": float,                    # primary MIA score (0.5 = no leakage)
+            "accuracy": float,
+            "variant_used": str,                # differs from ``variant`` if the BNAF fallback fired
+            "reference_size": int,              # possibly capped
+            "n_features_used": int,             # after the constant-column guard
+            "dropped_constant_columns": list,   # column names removed by the guard
+        }
+
+    Note:
+        Columns must be numeric and shared across all inputs; only the common columns (in
+        ``data_members`` order) are used. All available members are tested against
+        ``reference_size`` non-members, so the test set is intentionally imbalanced -- average
+        the AUCROC over several synthetic draws / cross-validation folds for a stable estimate.
+    """
+    if variant not in _DOMIAS_VARIANTS:
+        raise ValueError(
+            f"Unknown variant {variant!r}. Choose from {sorted(_DOMIAS_VARIANTS)}."
+        )
+
+    members = pd.DataFrame(data_members).reset_index(drop=True)
+    nonmembers = pd.DataFrame(data_nonmembers).reset_index(drop=True)
+    syn = pd.DataFrame(data_syn).reset_index(drop=True)
+    using_ref_syn = data_ref_syn is not None
+    ref_syn = pd.DataFrame(data_ref_syn).reset_index(drop=True) if using_ref_syn else syn
+
+    # DOMIAS concatenates these frames, so they must expose identical columns in identical
+    # order. Keep only the columns shared by every frame, in ``members`` order.
+    frames = [members, nonmembers, syn, ref_syn]
+    common = [c for c in members.columns if all(c in f.columns for f in frames)]
+    if not common:
+        raise ValueError(
+            "No shared feature columns across members / non-members / synthetic data."
+        )
+    members, nonmembers, syn, ref_syn = members[common], nonmembers[common], syn[common], ref_syn[common]
+
+    # DOMIAS' reference density (normal_func_feat) needs at least one (quasi-)continuous feature
+    # (>=10 unique values pooled over the real data); otherwise synthcity raises internally.
+    pooled_unique = pd.concat([members, nonmembers], ignore_index=True).nunique()
+    continuous_cols = {c for c in common if pooled_unique[c] >= 10}
+    if not continuous_cols:
+        raise ValueError(
+            "DOMIAS requires at least one (quasi-)continuous feature (>=10 unique values); "
+            "none of the shared columns qualify."
+        )
+
+    # Holdout budget: non-members and the reference set are disjoint slices of the held-out
+    # rows, so we need 2 * reference_size of them.
+    max_reference = len(nonmembers) // 2
+    if max_reference < 1:
+        raise ValueError(
+            f"Need at least 2 non-member rows to form the test/reference slices; got {len(nonmembers)}."
+        )
+    if reference_size > max_reference:
+        warnings.warn(
+            f"reference_size={reference_size} is too large for {len(nonmembers)} non-member rows; "
+            f"capping to {max_reference} so the non-member and reference slices stay disjoint."
+        )
+        reference_size = max_reference
+
+    # Constant-column guard: gaussian_kde (KDE/prior) inverts the covariance of its inputs and
+    # blows up on a constant column. Drop any non-continuous column that is constant in a frame
+    # gaussian_kde fits on -- the synthetic sample and the reference slice (the last
+    # reference_size held-out rows). Continuous columns are protected so the reference density
+    # keeps a feature; a degenerate continuous column instead trips the BNAF fallback below.
+    dropped = []
+    if drop_constant:
+        guard_frames = [syn, nonmembers.iloc[-reference_size:]]
+        constant = sorted(
+            c for c in common
+            if c not in continuous_cols
+            and any(f[c].nunique(dropna=False) <= 1 for f in guard_frames)
+        )
+        keep = [c for c in common if c not in constant]
+        if constant and keep:
+            dropped = constant
+            common = keep
+            members, nonmembers, syn, ref_syn = members[keep], nonmembers[keep], syn[keep], ref_syn[keep]
+
+    workspace = Path(workspace) if workspace is not None else Path(tempfile.gettempdir()) / "synthcity_mia_workspace"
+
+    variant_used = variant
+    try:
+        result = _run_domias_attack(
+            variant, members, nonmembers, syn, ref_syn, reference_size, random_state, workspace
+        )
+    except (LinAlgError, ValueError) as err:
+        if variant in ("KDE", "prior") and fallback_to_bnaf:
+            warnings.warn(
+                f"DOMIAS {variant} failed numerically ({type(err).__name__}: {err}); "
+                f"falling back to BNAF."
+            )
+            variant_used = "BNAF"
+            result = _run_domias_attack(
+                "BNAF", members, nonmembers, syn, ref_syn, reference_size, random_state, workspace
+            )
+        else:
+            raise
+
+    return {
+        "aucroc": float(result["aucroc"]),
+        "accuracy": float(result["accuracy"]),
+        "variant_used": variant_used,
+        "reference_size": int(reference_size),
+        "n_features_used": len(common),
+        "dropped_constant_columns": dropped,
+    }
 
 
 def estimate_agreement(real_ci, augmented_est):
