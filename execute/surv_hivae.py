@@ -204,23 +204,25 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
             else: 
                 best_val_loss = avg_loss_val
                 counter = 0
-            early_stop = False
-            if counter >= patience and epoch >= n_iter_min:
+            # Early stopping is disabled under differential privacy: Opacus calibrates the
+            # noise multiplier σ to reach exactly target_epsilon after the *full* `epochs`
+            # schedule. Stopping early would leave the realized ε below target while still
+            # injecting σ sized for the full run — i.e. worse utility at a mislabeled ε. We
+            # keep computing the validation loss (for logging / HPO) but never break.
+            if counter >= patience and epoch >= n_iter_min and not differential_privacy:
                 print(f"Early stopping at epoch {global_epoch}.")
-                early_stop = True
                 break
         else:
             loss_val.append(torch.nan)
 
     if differential_privacy:
         # ─── Report consumed privacy budget ────────────────────────────────
+        # Early stopping is disabled under DP (see training loop), so training always runs
+        # the full `epochs` schedule and the realized ε matches the requested target_epsilon.
         final_epsilon = privacy_engine.get_epsilon(delta=target_delta)
         if verbose:
-            print(f"Training finished. Final ε: {final_epsilon:.2f} (δ={target_delta})")
-            if early_stop:
-                print(f"Early stop: actual ε = {final_epsilon:.2f} < requested ε ≤ {target_epsilon}")
-            else:
-                print(f"Full training: actual ε = {final_epsilon:.2f}, requested ε ≤ {target_epsilon}")
+            print(f"Training finished. Final ε: {final_epsilon:.2f} "
+                  f"(δ={target_delta}, requested ε ≤ {target_epsilon})")
         unwrapped_model = vae_model._module
         unwrapped_model.eval()
         # return unwrapped_model, loss_train, loss_val, final_epsilon
@@ -594,14 +596,14 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_
 
     if "_DP" in generator_name:
         hp_space.append(CategoricalDistribution(name="max_grad_norm", choices=[0.1, 0.3, 1.0, 3.0, 10.0]))
-        hp_space.append(CategoricalDistribution(name="epochs", choices=[20, 50, 100, 200, 400, 1000]))
+        hp_space.append(CategoricalDistribution(name="epochs", choices=[50, 100, 500, 1000, 1500]))
 
     # When `tune_epsilon` is on, the DP privacy budget itself becomes a tuned HP.
     # Named "target_epsilon" so it drops straight into the train_HIVAE arg of the
     # same name (overriding the function-level target_epsilon per trial). When off,
     # the space is identical to before — epsilon is simply not searched.
     if tune_epsilon:
-        hp_space.append(CategoricalDistribution(name="target_epsilon", choices=[1, 2, 3, 5, 10]))
+        hp_space.append(CategoricalDistribution(name="target_epsilon", choices=[1, 3, 5, 7, 10]))
 
     if "_diffusion" in generator_name:
         hp_space.append(CategoricalDistribution(name="diffusion_lr", choices=[1e-4, 2e-4, 1e-3, 2e-3, 3e-3, 5e-3]))
