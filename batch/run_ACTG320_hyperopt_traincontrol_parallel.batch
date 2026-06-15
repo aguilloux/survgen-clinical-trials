@@ -8,6 +8,7 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
 #SBATCH --partition=gpu
+#SBATCH --exclude=gpu012,gpu013,gpu015,gpu016,gpu017,gpu009,gpu018,gpu004,gpu001
 
 echo "### Starting GPU job: $SLURM_JOB_NAME ###"
 cd ${SLURM_SUBMIT_DIR}
@@ -16,7 +17,7 @@ module purge
 
 # Load your Python environment
 source /home/$USER/.bashrc
-source activate .venv_HI_VAE_ext
+source activate hivae  
 
 # Arguments
 GENERATOR_ID=${SLURM_ARRAY_TASK_ID}

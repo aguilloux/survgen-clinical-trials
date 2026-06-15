@@ -2,12 +2,13 @@
 #SBATCH --job-name=realdataset_traincontrol_compare         # A name for your job
 #SBATCH --cpus-per-gpu=16               # Set number of CPUs per GPU card (adjust if needed)
 #SBATCH --partition=gpu                 # Use the GPU partition
-#SBATCH --gres=gpu:v100:1               # Request 1 A100 GPU
+# SBATCH --gres=gpu:v100:1               # Request 1 A100 GPU
 #SBATCH --mem=24G                       # Memory allocation, adjust based on your usage
 #SBATCH --time=2-00:00:00               # Adjust the time limit as needed (10 hours here)
-#SBATCH --array=0-3                     # one task per dataset
+#SBATCH --array=0                     # one task per dataset
 #SBATCH --output=logs/realdataset_traincontrol_compare_%A_%a.out     # Output file named after job and ID
 #SBATCH --error=logs/realdataset_traincontrol_compare_%A_%a.err
+#SBATCH --exclude=gpu012,gpu013,gpu015,gpu016,gpu017,gpu009,gpu018,gpu004,gpu001
 
 echo "### Starting GPU job: $SLURM_JOB_NAME ###"
 cd ${SLURM_SUBMIT_DIR}
@@ -16,7 +17,7 @@ module purge
 
 # Load your Python environment
 source /home/$USER/.bashrc
-source activate .venv_HI_VAE_ext
+source activate hivae 
 
 # Arguments
 data_ID=${SLURM_ARRAY_TASK_ID}
