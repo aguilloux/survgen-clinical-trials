@@ -133,7 +133,7 @@ def run(dataset_name, generator_name):
                                                                                                 target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
                                                                                                 target_delta=1e-5,
                                                                                                 tune_params=None, # if None, the function will use the default hyperparameters to tune,
-                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": n_samples}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": 200}, # these parameters will be fixed to the specified value and not tuned,
                                                                                                 norm_mode="global",
                                                                                                 screening_epochs=800,
                                                                                                 n_startup_trials=20,
@@ -153,7 +153,7 @@ def run(dataset_name, generator_name):
                                                                                                                 target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
                                                                                                                 target_delta=1e-5,
                                                                                                                 tune_params=None,
-                                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": n_samples}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": 200}, # these parameters will be fixed to the specified value and not tuned,
                                                                                                                 norm_mode="global",
                                                                                                                 screening_epochs=800,
                                                                                                                 n_startup_trials=20,
