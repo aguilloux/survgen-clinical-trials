@@ -21,4 +21,4 @@ source activate .venv_HI_VAE_ext
 # Arguments
 GENERATOR_ID=${SLURM_ARRAY_TASK_ID}
 
-python3 ../script/ACTG320_hyperopt_traincontrol_parallel.py $GENERATOR_ID
+python3 ../script/ACTG320_hyperopt_traincontrol_parallel_testHPO.py $GENERATOR_ID

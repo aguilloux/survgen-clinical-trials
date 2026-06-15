@@ -101,8 +101,8 @@ def run(MC_id):
     independent = True
     data_types_create = True
 
-    # optuna_version_name = "ExMetrics1_seedData{}_seedHPO{}".format(0, 11)
-    optuna_version_name = "ValLoss_seedData{}_seedHPO{}".format(0, 11)
+    # optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(0, 11)
+    optuna_version_name = "ValLoss_seedData{}_seedHPO{}".format(0, 12)
     print("HPO version:", optuna_version_name)
 
     dataset_name = "Simulations_indep_traincontrol"
