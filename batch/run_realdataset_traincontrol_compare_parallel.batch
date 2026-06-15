@@ -22,4 +22,4 @@ source activate .venv_HI_VAE_ext
 data_ID=${SLURM_ARRAY_TASK_ID}
 
 # Run your Python script
-python3 ../script/realdataset_compare_traincontrol_parallel.py $data_ID
+python3 ../script/realdataset_compare_traincontrol_parallel_testHPO.py $data_ID

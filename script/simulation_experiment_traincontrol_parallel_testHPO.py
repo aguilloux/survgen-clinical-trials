@@ -217,10 +217,10 @@ def run(MC_id):
         # For each generator, perform the data generation with the best params
         for generator_name in generators_sel:
             best_params = best_params_dict[generator_name]
-            best_params["epochs"] = 10000
             if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",  "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP"]:
                 gen_from_prior = "_prior" in generator_name
                 differential_privacy = "_DP" in generator_name
+                best_params["epochs"] = 10000
                 feat_types_dict_ext = adjust_feat_types_for_generator(generator_name, feat_types_dict)
                 data_gen_control = generators_dict[generator_name].run(df_init_control_encoded, miss_mask_control, 
                                                                        true_miss_mask_control, feat_types_dict_ext, 
