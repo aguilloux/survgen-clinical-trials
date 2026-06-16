@@ -60,7 +60,7 @@ def run(dataset_name, generator_name):
 
     # Parameters of the optuna study
     HPO_version = "external_metrics" # "external_metrics" or "validation_loss"
-    metric_optuna = ["survival_km_distance"] #, "k-map"] # metric to optimize in optuna
+    metric_optuna = ["survival_km_distance", "identifiability_score"] #, "k-map"] # metric to optimize in optuna
     method_hyperopt = "train_full_gen_full"
     n_splits = 5 # number of splits for cross-validation
     n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
@@ -68,7 +68,7 @@ def run(dataset_name, generator_name):
 
     seed_HPO_list = [10,11,12]
     for seed_HPO in seed_HPO_list:
-        optuna_version_name = "ExMetrics1_seedHPO{}".format(seed_HPO)
+        optuna_version_name = "ExMetrics2_seedHPO{}".format(seed_HPO)
         # optuna_version_name = "ValLoss_seedHPO{}".format(seed_HPO)
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
@@ -132,7 +132,7 @@ def run(dataset_name, generator_name):
                                                                                                 target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
                                                                                                 target_delta=1e-5,
                                                                                                 tune_params=None, # if None, the function will use the default hyperparameters to tune,
-                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": 200}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                fixed_params={"epochs": 10000}, # these parameters will be fixed to the specified value and not tuned,
                                                                                                 norm_mode="global",
                                                                                                 screening_epochs=800,
                                                                                                 n_startup_trials=20,
@@ -152,7 +152,7 @@ def run(dataset_name, generator_name):
                                                                                                                 target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
                                                                                                                 target_delta=1e-5,
                                                                                                                 tune_params=None,
-                                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": 200}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                                fixed_params={"epochs": 10000}, # these parameters will be fixed to the specified value and not tuned,
                                                                                                                 norm_mode="global",
                                                                                                                 screening_epochs=800,
                                                                                                                 n_startup_trials=20,
