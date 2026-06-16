@@ -60,7 +60,7 @@ def run(dataset_name, generator_name):
 
     # Parameters of the optuna study
     HPO_version = "external_metrics" # "external_metrics" or "validation_loss"
-    metric_optuna = ["survival_km_distance", "k-map"] # metric to optimize in optuna
+    metric_optuna = ["survival_km_distance"] #, "k-map"] # metric to optimize in optuna
     method_hyperopt = "train_full_gen_full"
     n_splits = 5 # number of splits for cross-validation
     n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
@@ -68,7 +68,7 @@ def run(dataset_name, generator_name):
 
     seed_HPO_list = [10,11,12]
     for seed_HPO in seed_HPO_list:
-        optuna_version_name = "ExMetrics2_seedHPO{}".format(seed_HPO)
+        optuna_version_name = "ExMetrics1_seedHPO{}".format(seed_HPO)
         # optuna_version_name = "ValLoss_seedHPO{}".format(seed_HPO)
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
