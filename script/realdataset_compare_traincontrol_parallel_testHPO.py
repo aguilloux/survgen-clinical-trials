@@ -63,8 +63,8 @@ def run(dataset_name, generators_sel):
     name_config = dataset_name
     n_trials = 150
 
-    # optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(0, 10)
-    optuna_version_name = "ValLoss_seedHPO{}".format(0, 10)
+    optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(0, 10)
+    # optuna_version_name = "ValLoss_seedHPO{}".format(0, 10)
     print("HPO version:", optuna_version_name)
 
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
