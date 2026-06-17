@@ -37,8 +37,8 @@ def run(dataset_name, generators_sel):
 
     # Load and transform control data
     df_init_control_encoded, feat_types_dict, miss_mask_control, true_miss_mask_control, _ = data_processing.read_data(data_file_control,
-                                                                                                                feat_types_file_control,
-                                                                                                                miss_file, true_miss_file)
+                                                                                                                    feat_types_file_control,
+                                                                                                                    miss_file, true_miss_file)
     data_init_control_encoded = torch.from_numpy(df_init_control_encoded.values)
     data_init_control = data_processing.discrete_variables_transformation(data_init_control_encoded, feat_types_dict)
 
@@ -63,7 +63,7 @@ def run(dataset_name, generators_sel):
     name_config = dataset_name
     n_trials = 150
 
-    # optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(0, 11)
+    # optuna_version_name = "ExMetrics2_seedData{}_seedHPO{}".format(0, 10)
     optuna_version_name = "ValLoss_seedHPO{}".format(0, 10)
     print("HPO version:", optuna_version_name)
 
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
     # dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise"]
-    dataset_sel = ["ACTG320"]
+    dataset_sel = ["NCT00113763"]
     dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]
     run(dataset_name , generators_sel)
