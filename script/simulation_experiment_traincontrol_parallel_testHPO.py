@@ -152,7 +152,7 @@ def run(MC_id):
     treat_effects = np.arange(0., 1.1, 0.2)
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
-                                'Detection XGB', 'NNDR', 'K-map score']
+                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score']
 
     # Initialize storage for metrics and results
     synthcity_metrics_res_dict = {generator_name: pd.DataFrame() for generator_name in generators_sel}

@@ -110,7 +110,7 @@ def run(generator_name):
     df_init = pd.concat([df_init_control, df_init_treated], ignore_index=True)
 
     # Parameters of the optuna study
-    HPO_version = "validation_loss" # "external_metrics" or "validation_loss"
+    HPO_version = "external_metrics" # "external_metrics" or "validation_loss"
     metric_optuna = ["survival_km_distance", "identifiability_score"] # metric to optimize in optuna
     method_hyperopt = "train_full_gen_full"
     n_splits = 3 # number of splits for cross-validation
