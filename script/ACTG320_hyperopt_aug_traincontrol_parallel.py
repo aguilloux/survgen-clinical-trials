@@ -125,7 +125,7 @@ def run(generator_name):
                         feat_types_dict_ext[i]["type"] = 'surv'
                     else:
                         feat_types_dict_ext[i]["type"] = 'surv_piecewise'
-            if generator_name in ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior", "HI-VAE_piecewise_diffusion"]:
+            if generator_name in ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
                 gen_from_prior = True
             else:
                 gen_from_prior = False
