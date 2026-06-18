@@ -173,7 +173,7 @@ def run(dataset_name, generators_sel):
             log_p_value_control_list = []
             for j in range(n_generated_dataset):
                 df_gen_control_j = pd.DataFrame(data_gen_control_dict[generator_name][j].numpy(), columns=fnames)
-                df_gen_control_j.to_csv(save_gen_data_dir +  + "df_gen_control_" + "aug_Ncontrol{}%3_".format((d+1)) + generator_name + "_{}.csv".format(j), index=False)
+                df_gen_control_j.to_csv(save_gen_data_dir +  + "df_gen_control_" + "aug_Ncontrol{}%3_".format((d+1)) + generator_name  + "_" + optuna_metric + "_{}.csv".format(j), index=False)
                 df_gen_control_j['treatment'] = 0
                 list_df_gen_control.append(df_gen_control_j)
                 data_syn.append(pd.concat([df_init_treated, df_gen_control_j], ignore_index=True))
