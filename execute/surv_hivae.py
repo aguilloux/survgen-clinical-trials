@@ -588,7 +588,7 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_
         CategoricalDistribution(name="batch_size", choices=get_batchsize(n_samples, n_splits) + [32]),
         IntegerDistribution(name="z_dim", low=10, high=200, step=10),
         IntegerDistribution(name="y_dim", low=10, high=200, step=10),
-        IntegerDistribution(name="s_dim", low=10, high=200, step=10),
+        IntegerDistribution(name="s_dim", low=2, high=20, step=2),
     ]
     if "HI-VAE_piecewise" in generator_name:
        hp_space.append(CategoricalDistribution(name="n_layers_surv_piecewise", choices=[1, 2]))
