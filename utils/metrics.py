@@ -16,6 +16,9 @@ import numpy as np
 import pandas as pd
 from numpy.linalg import LinAlgError
 
+from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import StandardScaler
+
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from lifelines import CoxPHFitter
 
@@ -186,7 +189,75 @@ def strata_cox_estimation(data_init, data_syn, strata=None):
 
     return coef_init, np.array(coef_syn), p_value_init, np.array(p_value_syn)
 
-def general_metrics(data_init, data_gen, generator):
+def compute_nndr(data_real, data_syn, columns=None, eps=1e-8):
+    """
+    Per-record Nearest Neighbor Distance Ratio (NNDR) in the synthetic -> real direction.
+
+    For each synthetic record, find its nearest (d1) and second-nearest (d2) records
+    in the real dataset and return d1 / d2. Features are standardized using statistics
+    fitted on the real data, so a wide-scale column (e.g. 'time') cannot dominate the
+    Euclidean distance. Because the query set (synthetic) differs from the search set
+    (real), d1 is a genuine real neighbor, not a trivial self-match.
+
+    The ratio lies in [0, 1]: values near 0 flag synthetic records that single out one
+    real record (potential privacy leakage), values near 1 indicate records sitting in a
+    dense region without pinpointing any single individual.
+
+    Args:
+        data_real (DataFrame): Real (reference) dataset; the neighbor search space.
+        data_syn (DataFrame): Synthetic dataset; the query records.
+        columns (list, optional): Columns to use for the distance. Defaults to the
+            numeric columns shared by both frames.
+        eps (float): Floor on d2 to avoid division by zero when a synthetic record
+            coincides with >=2 real records (d1 = d2 = 0 -> NNDR = 0, i.e. flagged risky).
+
+    Returns:
+        np.ndarray: NNDR value in [0, 1] for each synthetic record.
+    """
+    real = pd.DataFrame(data_real).reset_index(drop=True)
+    syn = pd.DataFrame(data_syn).reset_index(drop=True)
+
+    if columns is None:
+        columns = [c for c in real.columns
+                   if c in syn.columns and np.issubdtype(real[c].dtype, np.number)]
+    if not columns:
+        raise ValueError("No shared numeric columns to compute NNDR on.")
+
+    # Fit the standardization on the real data: it is the reference frame the synthetic
+    # records are scored against. StandardScaler maps zero-variance columns to scale 1,
+    # so constant columns stay finite instead of producing NaNs.
+    scaler = StandardScaler().fit(real[columns].to_numpy())
+    real_scaled = scaler.transform(real[columns].to_numpy())
+    syn_scaled = scaler.transform(syn[columns].to_numpy())
+
+    nn = NearestNeighbors(n_neighbors=2).fit(real_scaled)
+    dist, _ = nn.kneighbors(syn_scaled)  # query synthetic against real
+    d1, d2 = dist[:, 0], dist[:, 1]
+    return d1 / np.maximum(d2, eps)
+
+def nndr(data_real, data_syn, columns=None, percentile=5, eps=1e-8):
+    """
+    Reduced NNDR statistics for the synthetic -> real direction.
+
+    Args:
+        data_real (DataFrame): Real (reference) dataset.
+        data_syn (DataFrame): Synthetic dataset.
+        columns (list, optional): Columns to use. Defaults to shared numeric columns.
+        percentile (float): Low percentile summarizing the risky tail. Defaults to 5.
+        eps (float): Division-by-zero floor passed to compute_nndr.
+
+    Returns:
+        dict: {"mean": float, "p{percentile}": float}. The mean matches the homogeneous
+            "everything is a mean" style of the general_metrics tables; the low percentile
+            captures the risky tail (synthetic records with NNDR near 0).
+    """
+    scores = compute_nndr(data_real, data_syn, columns=columns, eps=eps)
+    return {
+        "mean": float(np.mean(scores)),
+        f"p{percentile}": float(np.percentile(scores, percentile)),
+    }
+
+def general_metrics(data_init, data_gen, generator, include_nndr=True):
     """
     Compute a set of general quality metrics to assess synthetic survival data.
 
@@ -194,6 +265,7 @@ def general_metrics(data_init, data_gen, generator):
         data_init (DataFrame): Initial real-world dataset.
         data_gen (list of DataFrame): List of generated synthetic datasets.
         generator (str): Name of the synthetic data generator.
+        include_nndr (bool): Append a mean NNDR (synthetic -> real) column. Defaults to True.
 
     Returns:
         DataFrame: Summary of metric scores for each synthetic dataset.
@@ -214,7 +286,7 @@ def general_metrics(data_init, data_gen, generator):
         "stats.ks_test.marginal": "KS test",
         "stats.survival_km_distance.abs_optimism": "Survival curves distance",
         "detection.detection_xgb.mean": "Detection XGB",
-        "sanity.nearest_syn_neighbor_distance.mean": "NNDR",
+        "sanity.nearest_syn_neighbor_distance.mean": "NSND",
         "privacy.k-map.score": "K-map score",
         "privacy.identifiability_score.score": "Identifiability score"
     }
@@ -264,11 +336,16 @@ def general_metrics(data_init, data_gen, generator):
             else:
                 val = np.nan
             values.append(val)
+        if include_nndr:
+            values.append(nndr(data_init, generated_data)["mean"])
         # print("values: ", values)
         scores.append(values)
 
-    score_df = pd.DataFrame(scores, columns=["J-S distance", "KS test", "Survival curves distance", 
-                                             "Detection XGB", "NNDR", "K-map score", "Identifiability score"])
+    columns = ["J-S distance", "KS test", "Survival curves distance",
+               "Detection XGB", "NSND", "K-map score", "Identifiability score"]
+    if include_nndr:
+        columns = columns + ["NNDR"]
+    score_df = pd.DataFrame(scores, columns=columns)
     score_df["generator"] = generator
 
     return score_df
@@ -279,7 +356,7 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
         'performance': ['feat_rank_distance'],
         'detection': ['detection_xgb'],
         'privacy': ['k-map', 'distinct l-diversity', 'identifiability_score']
-    }):
+    }, include_nndr=True):
     """
     Compute a configurable set of quality metrics to assess synthetic survival data.
 
@@ -295,6 +372,7 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
         metrics (dict, optional): Dictionary mapping synthcity metric categories to
             lists of metric names to compute. Defaults to a standard set covering
             stats, detection, sanity, and privacy metrics.
+        include_nndr (bool): Append a mean NNDR (synthetic -> real) column. Defaults to True.
 
     Returns:
         DataFrame: Summary of metric scores for each synthetic dataset, with one
@@ -309,7 +387,7 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
         "stats.ks_test.marginal": "KS test",
         "stats.survival_km_distance.abs_optimism": "Survival curves distance",
         "detection.detection_xgb.mean": "Detection XGB",
-        "sanity.nearest_syn_neighbor_distance.mean": "NNDR",
+        "sanity.nearest_syn_neighbor_distance.mean": "NSND",
         "privacy.k-map.score": "K-map score",
         "privacy.identifiability_score.score": "Identifiability score"
     }
@@ -355,6 +433,9 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
                 val = evaluation.T[[metric]].T["mean"].values[0]
                 values.append(val)
                 name_columns.append(expected_metrics[metric])
+        if include_nndr:
+            values.append(nndr(data_init, generated_data)["mean"])
+            name_columns.append("NNDR")
         # print("values: ", values)
         scores.append(values)
 
