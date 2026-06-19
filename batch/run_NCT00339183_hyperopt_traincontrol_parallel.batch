@@ -17,7 +17,7 @@ module purge
 
 # Load your Python environment
 source /home/$USER/.bashrc
-source activate .venv_HI_VAE_ext  
+source activate hivae  
 
 # Arguments
 GENERATOR_ID=${SLURM_ARRAY_TASK_ID}
