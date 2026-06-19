@@ -63,7 +63,7 @@ def run(dataset_name, generators_sel):
     name_config = dataset_name
     n_trials = 150
 
-    optuna_version_name = "ExMetrics2_bis_seedHPO{}".format(10)
+    optuna_version_name = "ExMetrics2_seedHPO{}".format(10)
     # optuna_version_name = "ValLoss_seedHPO{}".format(10)
     print("HPO version:", optuna_version_name)
 
@@ -109,7 +109,7 @@ def run(dataset_name, generators_sel):
                                                                                         true_miss_mask_control, feat_types_dict_ext, 
                                                                                         n_generated_dataset, params=best_params, 
                                                                                         gen_from_prior=gen_from_prior, norm_mode="global",
-                                                                                        differential_privacy=differential_privacy)
+                                                                                        differential_privacy=differential_privacy, seed=2)
         else:
             data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                                         target_column="censor", time_to_event_column="time", 

@@ -178,63 +178,7 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                     cond = df[cond_generation.columns]
                     gen_data = run_with_timeout_mp(model, params, dataloader, cond_generation.shape[0]*n_generated_dataset, cond, n_generated_dataset, cond_generation, timeout=120)
                     scores = _evaluate_generation(gen_data, cond_dataloader, metrics_list)
-            # else:
-            # # k-fold cross-validation 
-            #     kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
-            #     for train_index, test_index in kf.split(df):
-            #         train_data, test_data = df.iloc[train_index], df.iloc[test_index]
-            #         train_data_loader = SurvivalAnalysisDataLoader(train_data, target_column=target_column, time_to_event_column=time_to_event_column)
-            #         test_data_loader = SurvivalAnalysisDataLoader(test_data, target_column=target_column, time_to_event_column=time_to_event_column)
-            #         full_data_loader = SurvivalAnalysisDataLoader(df, target_column=target_column, time_to_event_column=time_to_event_column)
-            #         cond = train_data[[target_column]]
-            #         model_trial = model(**params)
-
-            #         if method == 'train_train_gen_full':
-            #             model_trial.fit(train_data_loader, cond=cond)
-            #             # Generate
-            #             cond_gen = df[[target_column]]
-            #             score_k = []
-            #             for j in range(n_generated_dataset):
-            #                 gen_data = model_trial.generate(count=df.shape[0], cond=cond_gen)
-            #                 df_gen_data = gen_data.dataframe()
-            #                 if metric == 'log_rank_test':
-            #                     score_kj = metrics.compute_logrank_test(df, df_gen_data)
-            #                 else: # 'survival_km_distance'
-            #                     clear_cache()
-            #                     evaluation = Metrics().evaluate(X_gt=full_data_loader, # can be dataloaders or dataframes
-            #                                                     X_syn=gen_data, 
-            #                                                     reduction='mean', # default mean
-            #                                                     n_histogram_bins=10, # default 10
-            #                                                     # n_folds=1,
-            #                                                     metrics={'stats': ['survival_km_distance']},
-            #                                                     task_type='survival_analysis', 
-            #                                                     use_cache=True)
-            #                     score_kj = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-            #                 score_k.append(score_kj)
-            #         else:
-            #             model_trial.fit(train_data_loader, cond=cond)
-            #             # Generate
-            #             cond_gen = test_data[[target_column]]
-            #             score_k = []
-            #             for j in range(n_generated_dataset):
-            #                 gen_data = model_trial.generate(count=test_data.shape[0], cond=cond_gen)
-            #                 df_gen_data = gen_data.dataframe()
-            #                 if metric == 'log_rank_test':
-            #                     score_kj = metrics.compute_logrank_test(test_data, df_gen_data)
-            #                 else: # 'survival_km_distance'
-            #                     clear_cache()
-            #                     evaluation = Metrics().evaluate(X_gt=test_data_loader, # can be dataloaders or dataframes
-            #                                                     X_syn=gen_data, 
-            #                                                     reduction='mean', # default mean
-            #                                                     n_histogram_bins=10, # default 10
-            #                                                     # n_folds=1,
-            #                                                     metrics={'stats': ['survival_km_distance']},
-            #                                                     task_type='survival_analysis', 
-            #                                                     use_cache=True)
-            #                     score_kj = evaluation.T[["stats.survival_km_distance.abs_optimism"]].T["mean"].values[0]
-            #                 score_k.append(score_kj)
-            #         scores.append(np.mean(score_k))
-
+            
             print(f"Scores: {scores}")
         # except Exception as e:  # invalid set of params
         #     print(f"{type(e).__name__}: {e}")
@@ -300,3 +244,69 @@ def get_n_hyperparameters(generator_name):
     model = type(Plugins().get("survival_gan"))
     hp_space = model.hyperparameter_space()
     return len(hp_space)
+
+
+def optuna_hyperparameter_search_val_loss(data, columns, target_column, time_to_event_column, n_trials, 
+                                        study_name='optuna_study_surv_gan', seed=10):
+    
+    df = pd.DataFrame(data.numpy(), columns=columns) # Preprocessed dataset
+    dataloader = SurvivalAnalysisDataLoader(df, target_column=target_column, time_to_event_column=time_to_event_column)
+    cond = df[[target_column]]
+
+    def objective(trial: optuna.Trial):
+        set_seed(seed=seed)
+        model = type(Plugins().get("survival_gan"))
+        hp_space = model.hyperparameter_space()
+        hp_space[0].high = 3  # speed up for now
+        params = suggest_all(trial, hp_space)
+        ID = f"trial_{trial.number}"
+        print(ID)
+        score = None
+        try:
+            model_survgan_trial = model(**params)
+            model_survgan_trial.fit(dataloader, cond=cond)
+            score = model_survgan_trial.best_val_loss
+            print("Score:", score)
+
+        except optuna.TrialPruned:
+            raise
+        except Exception as e:  # invalid set of params
+            print(f"{type(e).__name__}: {e}")
+            print(params)
+            if isinstance(e, ValueError) and "invalid values" in str(e).lower():
+                raise optuna.exceptions.TrialPruned()
+            raise
+        return score
+        
+    db_file = study_name + '.db'
+    if os.path.exists(db_file):
+        print("This optuna study ({}) already exists. We load the study from the existing file.".format(db_file))
+        study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db')
+    else: 
+        create_kwargs = dict(
+            study_name=study_name,
+            storage=f'sqlite:///{db_file}',
+        )
+        create_kwargs["direction"] = "minimize"
+        create_kwargs["sampler"] = optuna.samplers.TPESampler(seed=seed)
+        study = optuna.create_study(**create_kwargs)
+
+        default_params = {'generator_n_layers_hidden': 2, 
+                          'generator_n_units_hidden': 500, 
+                          'generator_nonlin': 'relu', 
+                          'generator_dropout': 0.1, 
+                          'discriminator_n_layers_hidden': 2, 
+                          'discriminator_n_units_hidden': 500, 
+                          'discriminator_nonlin': 'leaky_relu', 
+                          'discriminator_dropout': 0.1, 
+                          'lr':  1e-3, 
+                          'weight_decay': 1e-3, 
+                          'encoder_max_clusters': 5}
+        study.enqueue_trial(default_params)
+        print("Enqueued trial:", study.get_trials(deepcopy=False))
+    study.optimize(objective, n_trials=n_trials)
+    
+    best_params = study.best_params
+    best_to_return = best_params
+
+    return best_to_return, study

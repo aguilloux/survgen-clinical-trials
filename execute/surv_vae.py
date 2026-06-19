@@ -316,3 +316,73 @@ def get_n_hyperparameters(generator_name):
     model = type(Plugins().get("survae"))
     hp_space = model.hyperparameter_space()
     return len(hp_space)
+
+
+def optuna_hyperparameter_search_val_loss(data, columns, target_column, time_to_event_column, n_trials, 
+                                          study_name='optuna_study_survae', seed=10):
+    
+    df = pd.DataFrame(data.numpy(), columns=columns) # Preprocessed dataset
+    data_loader = SurvivalAnalysisDataLoader(df, target_column=target_column, time_to_event_column=time_to_event_column)
+
+    def objective(trial: optuna.Trial):
+        set_seed()
+        model_survae = type(Plugins().get("survae"))
+        hp_space = model_survae.hyperparameter_space()
+        # hp_space[0].high = 100  # speed up for now
+        hp_space[3].choices = [1e-3, 1e-4, 1e-5]
+        hp_space[4].choices = [64, 128, 200, 256, 512]
+        params = suggest_all(trial, hp_space)
+        ID = f"trial_{trial.number}"
+        print(ID)
+        score = None
+        try:
+            model_survae_trial = model_survae(**params)
+            # train on full data
+            model_survae_trial.fit(data_loader)
+            score = model_survae_trial.best_val_loss
+            print("Score:", score)
+            
+        except optuna.TrialPruned:
+            raise
+        except Exception as e:  # invalid set of params
+            print(f"{type(e).__name__}: {e}")
+            print(params)
+            if isinstance(e, ValueError) and "invalid values" in str(e).lower():
+                raise optuna.exceptions.TrialPruned()
+            raise
+        return score
+
+    db_file = study_name + '.db'
+    if os.path.exists(db_file):
+        print("This optuna study ({}) already exists. We load the study from the existing file.".format(db_file))
+        study = optuna.load_study(study_name=study_name, storage='sqlite:///'+study_name+'.db')
+    else: 
+        create_kwargs = dict(
+            study_name=study_name,
+            storage=f'sqlite:///{db_file}',
+        )
+        create_kwargs["direction"] = "minimize"
+        create_kwargs["sampler"] = optuna.samplers.TPESampler(seed=seed)
+        study = optuna.create_study(**create_kwargs)
+
+        default_params = {'n_iter': 1000, 
+                          'lr': 1e-3, 
+                          'decoder_n_layers_hidden': 3, 
+                          'weight_decay': 1e-5,
+                          'batch_size': 200, 
+                          'n_units_embedding': 500, 
+                          'decoder_n_units_hidden': 500, 
+                          'decoder_nonlin': 'leaky_relu', 
+                          'decoder_dropout': 0, 
+                          'encoder_n_layers_hidden': 3, 
+                          'encoder_n_units_hidden': 500, 
+                          'encoder_nonlin': 'leaky_relu',
+                          'encoder_dropout': 0.1}
+        study.enqueue_trial(default_params)
+        print("Enqueued trial:", study.get_trials(deepcopy=False))
+    study.optimize(objective, n_trials=n_trials)
+
+    best_params = study.best_params
+    best_to_return = best_params
+
+    return best_to_return, study
