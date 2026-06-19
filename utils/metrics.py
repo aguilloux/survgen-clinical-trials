@@ -21,6 +21,7 @@ from sklearn.preprocessing import StandardScaler
 
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from lifelines import CoxPHFitter
+from tableone import TableOne
 
 from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader, GenericDataLoader
 from synthcity.utils.reproducibility import clear_cache, enable_reproducible_results
@@ -443,6 +444,45 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
     score_df["generator"] = generator
 
     return score_df
+
+def tableone_tests(df, groupby, categorical, continuous, nonnormal):
+    table1_sel = TableOne(df, groupby=groupby, categorical=categorical, continuous=continuous, nonnormal=nonnormal, pval=True).tableone
+
+    # Remove the sample variable from the TableOne consideration (since it is our groupby variable)
+    table1_sel = table1_sel[~table1_sel.index.isin([('sample, n (%)', '0'), ('sample, n (%)', '1')])]
+
+    # Select the relevant part of the DataFrame
+    table1_sel = table1_sel[f'Grouped by {groupby}']
+    table1_sel = table1_sel[~table1_sel['P-Value'].isin([''])]
+
+    # For p-values under 0.001, replace them by 0 in order to process it as a numerical variable
+    table1_sel.loc[(table1_sel['P-Value'] == '<0.001'), 'P-Value'] = '0.0'
+
+    # Find the lowest p-value and the column(s) associated to it
+    min_p_value = table1_sel['P-Value'].astype('float32').min()
+    cols_min_p_value = [index_i[0].split(',')[0] for index_i in list(table1_sel.loc[table1_sel['P-Value'].astype('float32') == min_p_value].index)]
+
+    # Compute the sum of all the p-values present in the tableone
+    sum_p_values = table1_sel['P-Value'].astype('float32').sum()
+
+    if groupby in ['sample', 'treatment']:
+        p_value_surv = np.exp(-compute_logrank_test(df[df[groupby] == 1], df[df[groupby] == 0]))
+        sum_p_values += p_value_surv
+        if p_value_surv < min_p_value:
+            min_p_value = p_value_surv
+            cols_min_p_value = ['survcens']
+        elif p_value_surv == min_p_value:
+            cols_min_p_value.append('survcens')
+        
+        survcens_row = {}
+        for table1_column in list(table1_sel.columns):
+            survcens_row[table1_column] = ''
+        survcens_row['P-Value'] = str(p_value_surv)
+
+        table1_sel.loc[('survcens', '')] = survcens_row
+        
+    
+    return table1_sel, min_p_value, cols_min_p_value, sum_p_values
 
 
 _DOMIAS_VARIANTS = {
