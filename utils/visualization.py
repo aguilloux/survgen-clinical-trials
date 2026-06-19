@@ -220,7 +220,7 @@ def visualize_general_perf(scores, metrics, title = None):
     """
     num_metrics = len(metrics)
     n_learners = len(np.unique(scores['generator'].values))
-    fig, axs = plt.subplots(1, num_metrics, figsize=(3 * num_metrics * n_learners, 6))
+    fig, axs = plt.subplots(1, num_metrics, figsize=(max(3 * num_metrics * n_learners, 6), 6))
 
     if num_metrics == 1:
         axs = [axs]  # ensure axs is iterable
@@ -233,20 +233,83 @@ def visualize_general_perf(scores, metrics, title = None):
             spine.set_edgecolor('black')
 
         sns.boxplot(data=scores, x='generator', y=metric_name, ax=ax,
-                    linewidth = 3, saturation = 1, palette = 'colorblind', 
-                    width = 1, gap = 0.15, whis = 0.8, linecolor="Black")
+                    linewidth = 2, saturation = 1, palette = 'colorblind', 
+                    width = 1, gap = 0.15, whis = 1.5, linecolor="Black")
         ax.set_xlabel('')
-        ax.set_ylabel(metric_name, fontsize=20, fontweight="semibold")
         ax.tick_params(axis='x', labelsize=18)
         ax.tick_params(axis='y', labelsize=18)
+
+        opt_arrow = ""
         if opt == "max":
-            ax.legend(title='Maximize \u2191', title_fontsize=15)
-        else:
-            ax.legend(title='Minimize \u2193', title_fontsize=15)
+            opt_arrow = ' \u2192'
+        elif opt == "min":
+            opt_arrow = ' \u2190'
+
+        ax.set_ylabel(metric_name + opt_arrow, fontweight="semibold", fontsize=20)
     if title is not None:
         plt.suptitle(title, y=0.8, fontsize=20, fontweight="semibold")
     plt.tight_layout(pad=3)
     plt.show()
+
+def visualize_grouped_perf(scores, dict_metrics, fontsize=20, panel_width=None,
+                           height=6, suptitle=None):
+    """
+    Combine several metric groups (e.g. Fidelity / Utility / Privacy) side by side in
+    a single figure. Every individual metric panel is given the same width regardless
+    of how many metrics each group holds, and all text (group titles, axis labels and
+    tick labels) is rendered at the same size.
+
+    Args:
+        scores (DataFrame): performance metrics for the different generators.
+        dict_metrics (dict): {group_title: [[metric_name, opt], ...], ...}, where
+            ``opt`` is "min" or "max" (controls the direction arrow on the y-label).
+        fontsize (int): font size used for every text element.
+        panel_width (float): width in inches allotted to each metric panel. If None,
+            it scales with the number of generators so boxes are never squished.
+        height (float): figure height in inches.
+        suptitle (str): optional overall figure title.
+    """
+    group_names = list(dict_metrics.keys())
+    counts = [len(dict_metrics[g]) for g in group_names]
+    total_metrics = sum(counts)
+    n_learners = len(np.unique(scores['generator'].values))
+
+    if panel_width is None:
+        panel_width = max(3 * n_learners, 3)
+
+    fig = plt.figure(figsize=(panel_width * total_metrics, height), layout="constrained")
+    # one sub-figure per group, side by side; width_ratios = metric count per group
+    # so every panel ends up the same width
+    subfigs = fig.subfigures(1, len(group_names), width_ratios=counts, wspace=0.02)
+    if len(group_names) == 1:
+        subfigs = [subfigs]
+
+    for subfig, group_name in zip(subfigs, group_names):
+        metrics = dict_metrics[group_name]
+        # squeeze=False keeps axs 2-D even for a single-metric group
+        axs = subfig.subplots(1, len(metrics), squeeze=False)[0]
+
+        for ax, (metric_name, opt) in zip(axs, metrics):
+            for spine in ax.spines.values():
+                spine.set_linewidth(2)
+                spine.set_edgecolor('black')
+
+            sns.boxplot(data=scores, x='generator', y=metric_name, ax=ax,
+                        linewidth=2, saturation=1, palette='colorblind',
+                        width=1, gap=0.15, whis=1.5, linecolor="Black")
+
+            opt_arrow = {"max": ' →', "min": ' ←'}.get(opt, "")
+            ax.set_xlabel('')
+            ax.set_ylabel(metric_name + opt_arrow, fontweight="semibold", fontsize=fontsize)
+            ax.tick_params(axis='x', labelsize=fontsize)
+            ax.tick_params(axis='y', labelsize=fontsize)
+
+        subfig.suptitle(group_name, fontsize=fontsize, fontweight="bold")
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=fontsize, fontweight="bold")
+    plt.show()
+
 
 def visualize_replicability_perf(scores):
     """
