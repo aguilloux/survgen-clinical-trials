@@ -21,7 +21,7 @@ import uuid
 from synthcity.utils.constants import DEVICE
 print('Device :', DEVICE)
 
-def run(dataset_name, generators_sel):
+def run(dataset_name, generators_sel, method_HPO):
 
     current_path = os.getcwd()  # Get current working directory
     parent_path = os.path.dirname(current_path)
@@ -63,8 +63,7 @@ def run(dataset_name, generators_sel):
     name_config = dataset_name
     n_trials = 150
 
-    optuna_version_name = "ExMetrics2_seedHPO{}".format(10)
-    # optuna_version_name = "ValLoss_seedHPO{}".format(10)
+    optuna_version_name = method_HPO
     print("HPO version:", optuna_version_name)
 
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
@@ -185,9 +184,11 @@ def setup_unique_working_dir(base_dir="experiments"):
 
 if __name__ == "__main__":
     # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
-    # dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
+    dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise"]
-    dataset_sel = ["NCT00113763"]
+    # dataset_sel = ["NCT00113763"]
     dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]
-    run(dataset_name , generators_sel)
+    method_HPO_list = ["DetectXGB", "ValLoss", "SurvDist", "Kmap_SurvDist", "IdfScore_SurvDist"]
+    for method_HPO in method_HPO_list:
+        run(dataset_name , generators_sel, method_HPO)

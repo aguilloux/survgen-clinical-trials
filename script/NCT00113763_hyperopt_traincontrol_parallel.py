@@ -65,7 +65,7 @@ def run(dataset_name, generator_name):
     name_config = dataset_name
 
     seed_HPO = 10
-    method_HPO_list = ["DetectXGB", "ValLoss", "SurvDist", "Kmap_SurvDist", "IdfScore_SurvDist"]
+    method_HPO_list = ["DetectXGB", "ValLoss", "SurvDist"] #, "Kmap_SurvDist", "IdfScore_SurvDist"]
     for method_HPO in method_HPO_list:
         optuna_version_name = method_HPO
         if method_HPO == "ValLoss":

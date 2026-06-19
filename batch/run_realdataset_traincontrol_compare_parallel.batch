@@ -6,7 +6,8 @@
 #SBATCH --partition=gpu                 # Use the GPU partition
 #SBATCH --mem=24G                       # Memory allocation, adjust based on your usage
 #SBATCH --time=2-00:00:00               # Adjust the time limit as needed (10 hours here)
-#SBATCH --array=0                     # one task per dataset
+#SBATCH --array=0-4                     # one task per dataset
+#SBATCH --gres=gpu:rtx8000:1
 #SBATCH --exclude=gpu012,gpu013,gpu015,gpu016,gpu017,gpu009,gpu018,gpu004,gpu001
 
 echo "### Starting GPU job: $SLURM_JOB_NAME ###"
