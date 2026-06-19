@@ -81,6 +81,12 @@ def run(dataset_name, generators_sel):
         # Format data in dataframe
         df_init_treated = pd.DataFrame(data_init_treated.numpy(), columns=fnames)
         df_init_control = pd.DataFrame(data_init_control.numpy(), columns=fnames)
+        save_gen_data_dir = parent_path + "/dataset/" + dataset_name + "/generated_datasets/"
+        if not os.path.exists(save_gen_data_dir):
+            os.makedirs(save_gen_data_dir)
+        df_init_treated.to_csv(save_gen_data_dir + "df_init_treated"  + "_aug_Ncontrol{}%3".format((d+1)) + ".csv", index=False)
+        df_init_control.to_csv(save_gen_data_dir + "df_init_control" + "_aug_Ncontrol{}%3".format((d+1)) + ".csv", index=False)
+
 
         # Update the data
         df_init_treated["treatment"] = 1
@@ -90,14 +96,20 @@ def run(dataset_name, generators_sel):
         # Parameters of the optuna study
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
         name_config = dataset_name
+        # optuna_metric = 'survival_km_distance'
+        # optuna_metric = ["survival_km_distance", "identifiability_score"]
+        optuna_metric = "['survival_km_distance', 'k-map']"
+        n_trials = 150
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
                         "HI-VAE_lognormal" : surv_hivae,
                         "Surv-GAN" : surv_gan,
                         "Surv-VAE" : surv_vae, 
-                        "HI-VAE_weibull_prior" : surv_hivae, 
-                        "HI-VAE_piecewise_prior" : surv_hivae}
+                        "HI-VAE_weibull_prior" : surv_hivae,
+                        "HI-VAE_piecewise_prior" : surv_hivae,
+                        "HI-VAE_weibull_diffusion" : surv_hivae,
+                        "HI-VAE_piecewise_diffusion" : surv_hivae}
         
         # Set a unique working directory for this job
         best_param_dir = parent_path + "/dataset/" + dataset_name + "/optuna_results"
@@ -105,7 +117,7 @@ def run(dataset_name, generators_sel):
         for generator_name in generators_sel:
             # best_param_file = [item for item in best_param_files if generator_name in item][0]
             for f in os.listdir(best_param_dir):
-                if (f.endswith(generator_name + '.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3".format((d+1)) in f)):
+                if (f.endswith(generator_name + '.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, optuna_metric) in f)):
                     best_param_file = f
             with open(best_param_dir + "/" + best_param_file, "r") as f:
                 best_params_dict[generator_name] = json.load(f)
@@ -116,11 +128,13 @@ def run(dataset_name, generators_sel):
             print("=" * 100)
             print("Generate data by " + generator_name)
             best_params = best_params_dict[generator_name]
-            if generator_name in ["HI-VAE_weibull", "HI-VAE_piecewise", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
+            if generator_name in ["HI-VAE_weibull", "HI-VAE_piecewise",
+                                  "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                                  "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
                 feat_types_dict_ext = feat_types_dict.copy()
                 for i in range(len(feat_types_dict)):
                     if feat_types_dict_ext[i]['name'] == "survcens":
-                        if generator_name in["HI-VAE_weibull", "HI-VAE_weibull_prior"]:
+                        if generator_name in["HI-VAE_weibull", "HI-VAE_weibull_prior", "HI-VAE_weibull_diffusion"]:
                             feat_types_dict_ext[i]["type"] = 'surv_weibull'
                         else:
                             feat_types_dict_ext[i]["type"] = 'surv_piecewise'
@@ -128,15 +142,22 @@ def run(dataset_name, generators_sel):
                     gen_from_prior = True
                 else:
                     gen_from_prior = False
-            if generator_name in ["HI-VAE_weibull", "HI-VAE_piecewise", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
+            if generator_name in ["HI-VAE_weibull", "HI-VAE_piecewise",
+                                  "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                                  "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
+                diffusion = False
+                if generator_name in ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
+                    diffusion = True
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(df_init_control_encoded, miss_mask_control,
                                                                                             true_miss_mask_control, feat_types_dict_ext,
-                                                                                            n_generated_dataset, params=best_params,
-                                                                                            epochs = 10000, gen_from_prior=gen_from_prior,
-                                                                                            n_generated_sample=n_generated_samples_control)
+                                                                                            n_generated_dataset,
+                                                                                            params=best_params,
+                                                                                            gen_from_prior=gen_from_prior,
+                                                                                            n_generated_sample=n_generated_samples_control,
+                                                                                            diffusion=diffusion)
             else:
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
-                                                                                            target_column="censor", 
+                                                                                            target_column="censor",
                                                                                             time_to_event_column="time", 
                                                                                             n_generated_dataset=n_generated_dataset, 
                                                                                             params=best_params,
@@ -152,6 +173,7 @@ def run(dataset_name, generators_sel):
             log_p_value_control_list = []
             for j in range(n_generated_dataset):
                 df_gen_control_j = pd.DataFrame(data_gen_control_dict[generator_name][j].numpy(), columns=fnames)
+                df_gen_control_j.to_csv(save_gen_data_dir +  + "df_gen_control_" + "aug_Ncontrol{}%3_".format((d+1)) + generator_name  + "_" + optuna_metric + "_{}.csv".format(j), index=False)
                 df_gen_control_j['treatment'] = 0
                 list_df_gen_control.append(df_gen_control_j)
                 data_syn.append(pd.concat([df_init_treated, df_gen_control_j], ignore_index=True))
@@ -163,21 +185,22 @@ def run(dataset_name, generators_sel):
                                   columns=["Generator", "log p_value"])
             df_log_p_value_control = pd.concat([df_log_p_value_control, tmp_df])
 
-        if not os.path.exists(parent_path + "/dataset/" + dataset_name + "/metric_results"):
-            os.makedirs(parent_path + "/dataset/" + dataset_name + "/metric_results")
+        save_res_dir = parent_path + "/dataset/" + dataset_name + "/metric_results_" + optuna_metric
+        if not os.path.exists(save_res_dir):
+            os.makedirs(save_res_dir)
 
-        df_log_p_value_control.to_csv(parent_path + "/dataset/" + dataset_name + '/metric_results/traincontrol_aug_Ncontrol{}%3_p_value_df.csv'.format((d+1)), index=False)
+        df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_p_value_df.csv'.format((d+1)), index=False)
         general_scores = []
         for generator_name in generators_sel:
             general_scores.append(general_metrics(df_init_control, df_gen_control_dict[generator_name], generator_name))
         general_scores_df = pd.concat(general_scores)
-        general_scores_df.to_csv(parent_path + "/dataset/" + dataset_name + '/metric_results/traincontrol_aug_Ncontrol{}%3_general_scores_df.csv'.format((d+1)), index=False)
+        general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_general_scores_df.csv'.format((d+1)), index=False)
 
         replicability_scores = []
         for generator_name in generators_sel:
             replicability_scores.append(replicability_ext(df_init, df_syn_dict[generator_name], generator_name))
         replicability_scores_df = pd.concat(replicability_scores, ignore_index=True)
-        replicability_scores_df.to_csv(parent_path + "/dataset/" + dataset_name + '/metric_results/traincontrol_aug_Ncontrol{}%3_replicability_scores_df.csv'.format((d+1)), index=False)
+        replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_replicability_scores_df.csv'.format((d+1)), index=False)
 
         columns = ['time', 'censor', 'treatment']
         _, _, ci_init, _ = fit_cox_model(df_init, columns)
@@ -204,13 +227,15 @@ def run(dataset_name, generators_sel):
                             "errors" : errors,
                             "label" : label,
                             "colors" : colors_})
-        err_df.to_csv(parent_path + "/dataset/" + dataset_name + '/metric_results/traincontrol_aug_Ncontrol{}%3_error_df.csv'.format((d+1)), index=False)
+        err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_error_df.csv'.format((d+1)), index=False)
 
         os.chdir(original_dir)
-   
+
 
 if __name__ == "__main__":
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
+                      "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
     dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]

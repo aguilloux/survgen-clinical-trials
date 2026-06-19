@@ -80,7 +80,9 @@ def run(generator_name):
         df_init_control["treatment"] = 0
        
         # Parameters of the optuna study
-        metric_optuna = "survival_km_distance" # metric to optimize in optuna
+        # metric_optuna = "survival_km_distance" # metric to optimize in optuna
+        # metric_optuna = ["survival_km_distance", "identifiability_score"]
+        metric_optuna = ["survival_km_distance", "k-map"]
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
@@ -92,7 +94,9 @@ def run(generator_name):
                         "Surv-GAN" : surv_gan,
                         "Surv-VAE" : surv_vae, 
                         "HI-VAE_weibull_prior" : surv_hivae, 
-                        "HI-VAE_piecewise_prior" : surv_hivae}
+                        "HI-VAE_piecewise_prior" : surv_hivae,
+                        "HI-VAE_weibull_diffusion" : surv_hivae,
+                        "HI-VAE_piecewise_diffusion" : surv_hivae}
         
         # Create directories for optuna results
         if not os.path.exists(parent_path + "/dataset/" + dataset_name + "/optuna_results"):
@@ -113,11 +117,13 @@ def run(generator_name):
 
         os.chdir(work_dir)  # Switch to private work dir
 
-        if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
+        if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise",
+                              "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                              "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
             feat_types_dict_ext = feat_types_dict.copy()
             for i in range(len(feat_types_dict)):
                 if feat_types_dict_ext[i]['name'] == "survcens":
-                    if generator_name in ["HI-VAE_weibull", "HI-VAE_weibull_prior"]:
+                    if generator_name in ["HI-VAE_weibull", "HI-VAE_weibull_prior", "HI-VAE_weibull_diffusion"]:
                         feat_types_dict_ext[i]["type"] = 'surv_weibull'
                     elif generator_name in ["HI-VAE_lognormal"]:
                         feat_types_dict_ext[i]["type"] = 'surv'
@@ -127,6 +133,9 @@ def run(generator_name):
                 gen_from_prior = True
             else:
                 gen_from_prior = False
+            diffusion = False
+            if "diffusion" in generator_name:
+                diffusion = True
             best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(df_init_control_encoded,
                                                                                             miss_mask_control, 
                                                                                             true_miss_mask_control,
@@ -141,7 +150,8 @@ def run(generator_name):
                                                                                             study_name=study_name, 
                                                                                             method=method_hyperopt, 
                                                                                             gen_from_prior=gen_from_prior, 
-                                                                                            n_generated_sample=n_generated_samples_control)
+                                                                                            n_generated_sample=n_generated_samples_control,
+                                                                                            diffusion=diffusion)
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study
             with open(best_params_file, "w") as f:
@@ -180,6 +190,8 @@ def setup_unique_working_dir(base_dir="experiments"):
   
 
 if __name__ == "__main__":
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
+                      "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     generator_id = int(sys.argv[1])
     run(generators_sel[generator_id])

@@ -61,7 +61,7 @@ class LatentDiffusion:
         batch_size: int = 512,
         lr: float = 1e-3,
         seed: int = 0,
-        patience: int = 20,
+        patience: int = 5,
         min_delta: float = 1e-6,
     ):
         self.latent_dim = latent_dim

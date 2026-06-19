@@ -188,8 +188,8 @@ class HIVAE(nn.Module):
         n_generated_dataset: int = 1,
         diffusion_hidden_dim: int = 256,
         diffusion_n_steps: int = 100,
-        diffusion_n_epochs: int = 1000,
-        diffusion_batch_size: int = 512,
+        diffusion_n_epochs: int = 200,
+        diffusion_batch_size: int = 2000,
         diffusion_lr: float = 1e-3,
     ):
         """
@@ -208,11 +208,9 @@ class HIVAE(nn.Module):
         q_params, samples = self.encode(X, tau)
 
         # ── 2. Fit diffusion on encoded latents ───────────────────────
-        latent_dim = self.s_dim + self.z_dim
-        latents_np = jnp.concatenate(
-            (samples["s"].detach().numpy(), samples["z"].detach().numpy()), axis=1
-        )
-        n_generated_sample = samples["s"].shape[0]
+        latent_dim = self.z_dim
+        latents_np = jnp.array(samples["z"].detach().numpy())
+        n_generated_sample = samples["z"].shape[0]
 
         diffusion = LatentDiffusion(
             latent_dim=latent_dim,
@@ -226,8 +224,7 @@ class HIVAE(nn.Module):
 
         # ── 3. Sample new latents & convert to torch ──────────────────
         diffusion_samples = diffusion.sample(n_generated_sample)
-        samples["s"] = torch.tensor(np.array(diffusion_samples[:, : self.s_dim]), dtype=torch.float32)
-        samples["z"] = torch.tensor(np.array(diffusion_samples[:, self.s_dim :]), dtype=torch.float32)
+        samples["z"] = torch.tensor(np.array(diffusion_samples), dtype=torch.float32)
 
         # ── 4. Decode & compute loss ──────────────────────────────────
         p_params, log_p_x, log_p_x_missing, samples = self.decode(
