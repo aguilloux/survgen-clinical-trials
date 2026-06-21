@@ -104,8 +104,8 @@ def run(dataset_name, generator_name):
         best_params_dict, study_dict = {}, {}
         n_trials = 150
         print("{} trials for {}...".format(n_trials, generator_name))
-        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_traincontrol_{}_ntrials{}_{}_{}".format(name_config, n_trials, metric_optuna, generator_name)
-        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_traincontrol_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, metric_optuna, generator_name)
+        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_traincontrol_{}_ntrials{}_{}_{}".format(name_config, n_trials, optuna_version_name, generator_name)
+        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_traincontrol_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, optuna_version_name, generator_name)
         db_file = study_name + ".db"
         if os.path.exists(db_file):
             print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))

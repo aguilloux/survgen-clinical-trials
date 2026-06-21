@@ -189,6 +189,6 @@ if __name__ == "__main__":
     # dataset_sel = ["NCT00113763"]
     dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]
-    method_HPO_list = ["DetectXGB", "ValLoss", "SurvDist", "Kmap_SurvDist", "IdfScore_SurvDist"]
+    method_HPO_list = ["DetectXGB", "ValLoss", "SurvDist"] #, "Kmap_SurvDist", "IdfScore_SurvDist"]
     for method_HPO in method_HPO_list:
         run(dataset_name , generators_sel, method_HPO)
