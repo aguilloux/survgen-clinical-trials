@@ -1,0 +1,1 @@
+{"lr": 0.003, "batch_size": 47, "z_dim": 80, "y_dim": 40, "s_dim": 8, "n_layers_surv_piecewise": 1, "n_intervals": 15, "diffusion_lr": 0.002, "diffusion_hidden_dim": 120, "diffusion_batch_size": 9440}

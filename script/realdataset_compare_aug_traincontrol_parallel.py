@@ -96,9 +96,8 @@ def run(dataset_name, generators_sel):
         # Parameters of the optuna study
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
         name_config = dataset_name
-        # optuna_metric = 'survival_km_distance'
-        # optuna_metric = ["survival_km_distance", "identifiability_score"]
-        optuna_metric = "['survival_km_distance', 'k-map']"
+        method_HPO = "Kmap_SurvDist"
+        optuna_version_name = method_HPO
         n_trials = 150
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,

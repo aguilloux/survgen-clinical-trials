@@ -80,9 +80,22 @@ def run(generator_name):
         df_init_control["treatment"] = 0
        
         # Parameters of the optuna study
-        # metric_optuna = "survival_km_distance" # metric to optimize in optuna
-        # metric_optuna = ["survival_km_distance", "identifiability_score"]
-        metric_optuna = ["survival_km_distance", "k-map"]
+        method_HPO = "Kmap_SurvDist"
+        optuna_version_name = method_HPO
+        if method_HPO == "ValLoss":
+            HPO_version = "validation_loss" # "external_metrics" or "validation_loss"
+        elif method_HPO == "DetectXGB":
+            HPO_version = "external_metrics"
+            metric_optuna = ["detection_xgb"]
+        elif method_HPO == "SurvDist":
+            HPO_version = "external_metrics"
+            metric_optuna = ["survival_km_distance"]
+        elif method_HPO == "Kmap_SurvDist":
+            HPO_version = "external_metrics"
+            metric_optuna = ["survival_km_distance", "k-map"]
+        elif method_HPO == "IdfScore_SurvDist":
+            HPO_version = "external_metrics"
+            metric_optuna = ["survival_km_distance", "identifiability_score"]
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
@@ -107,8 +120,8 @@ def run(generator_name):
         # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
         n_trials = 150
         print("{} trials for {}...".format(n_trials, generator_name))
-        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, metric_optuna, generator_name)
-        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, metric_optuna, generator_name)
+        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, optuna_version_name, generator_name)
+        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, optuna_version_name, generator_name)
         db_file = study_name + ".db"
         if os.path.exists(db_file):
             print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))
@@ -129,45 +142,81 @@ def run(generator_name):
                         feat_types_dict_ext[i]["type"] = 'surv'
                     else:
                         feat_types_dict_ext[i]["type"] = 'surv_piecewise'
-            if generator_name in ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
-                gen_from_prior = True
+            gen_from_prior = "_prior" in generator_name
+            differential_privacy = "_DP" in generator_name
+            diffusion = "_diffusion" in generator_name
+            if HPO_version == "external_metrics":
+                best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(df_init_control_encoded,
+                                                                                                miss_mask_control,
+                                                                                                true_miss_mask_control,
+                                                                                                feat_types_dict_ext,
+                                                                                                n_generated_dataset,
+                                                                                                n_splits=n_splits,
+                                                                                                n_trials=n_trials,
+                                                                                                columns=fnames,
+                                                                                                generator_name=generator_name,
+                                                                                                metric=metric_optuna,
+                                                                                                study_name=study_name,
+                                                                                                method=method_hyperopt,
+                                                                                                gen_from_prior=gen_from_prior,
+                                                                                                seed=10,
+                                                                                                target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
+                                                                                                target_delta=1e-5,
+                                                                                                tune_params=None, # if None, the function will use the default hyperparameters to tune,
+                                                                                                fixed_params={"epochs": 10000}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                norm_mode="global",
+                                                                                                screening_epochs=800,
+                                                                                                n_startup_trials=20,
+                                                                                                differential_privacy=differential_privacy,
+                                                                                                diffusion=diffusion,
+                                                                                                do_prune=False)
+            elif HPO_version == "validation_loss":
+                best_params_HIVAE, study = generators_dict[generator_name].optuna_hyperparameter_search_HIVAE_loss(df_init_control_encoded,
+                                                                                                                miss_mask_control,
+                                                                                                                true_miss_mask_control,
+                                                                                                                feat_types_dict_ext,
+                                                                                                                n_splits=n_splits,
+                                                                                                                n_trials=n_trials,
+                                                                                                                generator_name=generator_name,
+                                                                                                                study_name=study_name,
+                                                                                                                seed=10,
+                                                                                                                target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
+                                                                                                                target_delta=1e-5,
+                                                                                                                tune_params=None,
+                                                                                                                fixed_params={"epochs": 10000}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                                norm_mode="global",
+                                                                                                                screening_epochs=800,
+                                                                                                                n_startup_trials=20,
+                                                                                                                differential_privacy=differential_privacy,
+                                                                                                                do_prune=False)
+                if diffusion:
+                    # not implemented for the moment, as it is not the main focus of the paper and would require to re-run all the experiments with the diffuse version
+                    raise NotImplementedError("HPO based on validation loss is not implemented yet for the diffuse version of HI-VAE.")
+                else:
+                    best_params = best_params_HIVAE
             else:
-                gen_from_prior = False
-            diffusion = False
-            if "diffusion" in generator_name:
-                diffusion = True
-            best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(df_init_control_encoded,
-                                                                                            miss_mask_control, 
-                                                                                            true_miss_mask_control,
-                                                                                            feat_types_dict_ext, 
-                                                                                            n_generated_dataset, 
-                                                                                            n_splits=n_splits,
-                                                                                            n_trials=n_trials, 
-                                                                                            columns=fnames,
-                                                                                            generator_name=generator_name,
-                                                                                            fixed_params={'epochs': 10000},
-                                                                                            metric=metric_optuna,
-                                                                                            study_name=study_name, 
-                                                                                            method=method_hyperopt, 
-                                                                                            gen_from_prior=gen_from_prior, 
-                                                                                            n_generated_sample=n_generated_samples_control,
-                                                                                            diffusion=diffusion)
+                raise ValueError("Invalid HPO_version. Choose between 'external_metrics' and 'validation_loss'.")
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study
             with open(best_params_file, "w") as f:
                 json.dump(best_params, f)
-        else: 
-            best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(data_init_control, 
-                                                                                            columns=fnames, 
-                                                                                            target_column="censor", 
-                                                                                            time_to_event_column="time", 
-                                                                                            n_generated_dataset=n_generated_dataset, 
-                                                                                            n_splits=n_splits,
-                                                                                            n_trials=n_trials,
-                                                                                            metric=metric_optuna,
-                                                                                            study_name=study_name, 
-                                                                                            method=method_hyperopt, 
-                                                                                            n_generated_sample=n_generated_samples_control)
+        else:
+            if HPO_version == "external_metrics":
+                best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(data_init_control,
+                                                                                                columns=fnames,
+                                                                                                target_column="censor",
+                                                                                                time_to_event_column="time",
+                                                                                                n_generated_dataset=n_generated_dataset,
+                                                                                                n_splits=n_splits,
+                                                                                                n_trials=n_trials,
+                                                                                                metric=metric_optuna,
+                                                                                                study_name=study_name,
+                                                                                                method=method_hyperopt,
+                                                                                                n_generated_sample=n_generated_samples_control)
+            elif HPO_version == "validation_loss":
+                raise NotImplementedError("HPO based on validation loss is not implemented yet for Surv-GAN and Surv-VAE.")
+            else:
+                raise ValueError("Invalid HPO_version. Choose between 'external_metrics' and 'validation_loss'.")
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study
             with open(best_params_file, "w") as f:
