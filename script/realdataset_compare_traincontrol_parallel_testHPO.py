@@ -188,6 +188,6 @@ if __name__ == "__main__":
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise"]
     dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]
-    method_HPO = "SurvDist" # "DetectXGB" #, "ValLoss", "SurvDist"] #, "Kmap_SurvDist", "IdfScore_SurvDist"]
+    method_HPO = "ValLoss" # "DetectXGB" #, "ValLoss", "SurvDist"] #, "Kmap_SurvDist", "IdfScore_SurvDist"]
     # for method_HPO in method_HPO_list:
     run(dataset_name , generators_sel, method_HPO)
