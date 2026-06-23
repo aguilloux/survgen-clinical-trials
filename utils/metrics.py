@@ -477,13 +477,39 @@ def tableone_tests(df, groupby, categorical, continuous, nonnormal):
         survcens_row = {}
         for table1_column in list(table1_sel.columns):
             survcens_row[table1_column] = ''
-        survcens_row['P-Value'] = str(p_value_surv)
-
-        table1_sel.loc[('survcens', '')] = survcens_row
+        survcens_row['P-Value'] = str(np.round(p_value_surv, 3))
+        table1_sel = pd.concat([table1_sel, pd.DataFrame(survcens_row, index=('survcens', ''))]).iloc[:-1]
         
     
     return table1_sel, min_p_value, cols_min_p_value, sum_p_values
 
+def variable_pct_passed_tests(data_init, data_gen, categorical, continuous, nonnormal):
+    df_init_control_ext = data_init.copy()
+    df_init_control_ext['sample'] = 1
+
+    variables_pct_failed_tests = {}
+    for variable in categorical+continuous+['survcens']:
+        variables_pct_failed_tests[variable] = []
+
+    for generated_data in data_gen:
+        df_gen_control_ext = generated_data.copy()
+        df_gen_control_ext['sample'] = 0
+
+        table1, _, _, _, = tableone_tests(pd.concat([df_init_control_ext, df_gen_control_ext], ignore_index=True),
+                                          groupby='sample', categorical=categorical, continuous=continuous,
+                                          nonnormal=nonnormal)
+        for i in range(len(table1)):
+            name_str = table1.iloc[i].name
+            if name_str != 'survcens':
+                variable_name = name_str[0].split(',')[0]
+            else:
+                variable_name = name_str
+            significant_difference = 1 if float(table1.iloc[i]['P-Value']) > 0.05 else 0
+            variables_pct_failed_tests[variable_name].append(significant_difference)
+
+    for variable in categorical+continuous+['survcens']:
+        variables_pct_failed_tests[variable] = np.array(variables_pct_failed_tests[variable]).mean()
+    return variables_pct_failed_tests
 
 _DOMIAS_VARIANTS = {
     "KDE": DomiasMIAKDE,

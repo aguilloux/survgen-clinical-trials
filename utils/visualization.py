@@ -12,8 +12,13 @@ import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 sns.set(style="whitegrid", font="STIXGeneral", context="talk", palette="colorblind")
+
+# diverging colormap going orange -> light -> blue (low = orange, high = blue)
+BLUE_ORANGE = LinearSegmentedColormap.from_list("blue_orange",
+                                                ["#d8761d", "#f7f7f7", "#2166ac"])
 
 from sksurv.nonparametric import kaplan_meier_estimator
 from lifelines import KaplanMeierFitter
@@ -256,8 +261,11 @@ def visualize_grouped_perf(scores, dict_metrics, fontsize=20, panel_width=None,
     """
     Combine several metric groups (e.g. Fidelity / Utility / Privacy) side by side in
     a single figure. Every individual metric panel is given the same width regardless
-    of how many metrics each group holds, and all text (group titles, axis labels and
-    tick labels) is rendered at the same size.
+    of how many metrics each group holds, and all text (group labels, axis labels and
+    tick labels) is rendered at the same size. Each group name is left-aligned above
+    its leftmost panel (rather than centered over the group) so it is always clear
+    which metrics belong to which category, even when groups hold an unequal number
+    of metrics.
 
     Args:
         scores (DataFrame): performance metrics for the different generators.
@@ -304,7 +312,12 @@ def visualize_grouped_perf(scores, dict_metrics, fontsize=20, panel_width=None,
             ax.tick_params(axis='x', labelsize=fontsize)
             ax.tick_params(axis='y', labelsize=fontsize)
 
-        subfig.suptitle(group_name, fontsize=fontsize, fontweight="bold")
+        # left-align the group label (instead of centering it) so it sits above
+        # the group's leftmost panel; reads as "everything to the right of this
+        # label, up to the next group, belongs to this category" and keeps e.g.
+        # K-map score visibly under Privacy rather than appearing under Utility
+        subfig.suptitle(group_name, x=0.0, ha='left',
+                        fontsize=fontsize, fontweight="bold")
 
     if suptitle is not None:
         fig.suptitle(suptitle, fontsize=fontsize, fontweight="bold")
@@ -340,4 +353,62 @@ def visualize_replicability_perf(scores):
         ax.tick_params(axis='y', labelsize=18)
         ax.set_ylim(0, 1.05)
     plt.tight_layout(pad=3)
+    plt.show()
+
+
+def plot_variable_heatmap(dict_list, names, title=None, cmap=BLUE_ORANGE,
+                          vmin=0.0, vmax=1.0, figsize=None):
+    """
+    Compare several methods on a per-variable score with an annotated heatmap.
+
+    Each method is summarised by a dict mapping variable name -> score in [0, 1]
+    (typically the output of ``metrics.variable_pct_failed_tests``: the fraction
+    of generated datasets for which the per-variable TableOne test found no
+    significant difference from the real data). Methods become the rows and the
+    variables (the dict keys, assumed identical across methods) become the
+    columns. Every tile shows its value and is coloured on a fixed 0-1 scale, so
+    colours stay comparable across figures.
+
+    The variable names and the "Variable" axis label are placed along the top
+    edge, while the (optional) title sits underneath the heatmap.
+
+    Args:
+        dict_list (list of dict): one ``{variable: score}`` dict per method (e.g.
+            ``[a_test, b_test]``). All dicts are expected to share the same keys.
+        names (list of str): method names, one per dict, used as the row labels.
+            Must be the same length as ``dict_list``.
+        title (str): optional title, drawn at the bottom of the figure.
+        cmap: seaborn/matplotlib colormap. Default ``BLUE_ORANGE`` (low = orange,
+            high = blue).
+        vmin, vmax (float): fixed colour-scale bounds. Default 0-1.
+        figsize (tuple): optional (width, height) in inches; scales with the
+            number of variables/methods when left as None.
+    """
+    if len(dict_list) != len(names):
+        raise ValueError(f"dict_list and names must have the same length "
+                         f"({len(dict_list)} != {len(names)}).")
+
+    # rows = methods (names), columns = variables (dict keys, insertion order kept)
+    table = pd.DataFrame(dict_list, index=names)
+
+    if figsize is None:
+        figsize = (max(1.2 * table.shape[1] + 2, 6), max(0.8 * table.shape[0] + 1, 3))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.heatmap(table, annot=True, fmt=".2f", cmap=cmap, vmin=vmin, vmax=vmax,
+                linewidths=0.5, linecolor="white", cbar=False, ax=ax)
+
+    # variable names (tick labels) and the "Variable" axis label both on top
+    ax.xaxis.set_ticks_position("top")
+    ax.xaxis.set_label_position("top")
+    ax.set_xlabel("Variable", fontweight="semibold")
+    ax.set_ylabel("Method", fontweight="semibold")
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="left", rotation_mode="anchor")
+    plt.setp(ax.get_yticklabels(), rotation=0)
+
+    # title at the very bottom of the figure; reserve space so it is never clipped
+    plt.tight_layout(rect=[0, 0.12, 1, 1] if title is not None else None)
+    if title is not None:
+        fig.text(0.5, 0.02, title, ha="center", va="bottom", fontweight="bold")
+
     plt.show()
