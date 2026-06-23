@@ -757,8 +757,8 @@ def loglik_pos(batch_data, list_type, theta, normalization_params, n_generated_d
         "params": [est_mean, est_var],
         "log_p_x": log_p_x * missing_mask,
         "log_p_x_missing": log_p_x * (1.0 - missing_mask),
-        "samples": torch.clamp(torch.exp(Normal(est_mean, torch.sqrt(est_var)).sample(sample_shape=(n_generated_dataset, ))) , min=0, max=max_threshold)
-        #"samples": torch.clamp(torch.exp(Normal(est_mean, torch.sqrt(est_var)).sample(sample_shape=(n_generated_dataset, ))) - 1.0, min=0, max=max_threshold)
+        #"samples": torch.clamp(torch.exp(Normal(est_mean, torch.sqrt(est_var)).sample(sample_shape=(n_generated_dataset, ))) , min=0, max=max_threshold)
+        "samples": torch.clamp(torch.exp(Normal(est_mean, torch.sqrt(est_var)).sample(sample_shape=(n_generated_dataset, ))) - 1.0, min=0, max=max_threshold)
     }
 
 
