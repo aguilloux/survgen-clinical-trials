@@ -112,54 +112,159 @@ class LatentDiffusion:
     def _loss_fn(network, x_batch, t_batch, y_batch):
         return jnp.mean((network(x_batch, t_batch) - y_batch) ** 2)
 
+    @staticmethod
+    def _loss_only(network, x_batch, t_batch, y_batch):
+        """Same score-matching MSE as `_loss_fn`, but no gradient tape.
+
+        Used for validation passes where we want the loss value without
+        paying for (or risking misuse of) a gradient computation.
+        """
+        return jnp.mean((network(x_batch, t_batch) - y_batch) ** 2)
+
     def _train_step(self, x_batch, t_batch, y_batch) -> float:
         loss, grads = self._loss_fn(self.network, x_batch, t_batch, y_batch)
         self.optimizer.update(self.network, grads)
+        return float(loss)
+
+    def _eval_step(self, x_batch, t_batch, y_batch) -> float:
+        """Forward pass only — no optimizer update, no gradient computation."""
+        loss = self._loss_only(self.network, x_batch, t_batch, y_batch)
         return float(loss)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def fit(self, latents: jnp.ndarray, verbose: bool = True) -> "LatentDiffusion":
-        """Train the score network on `latents` (shape [N, latent_dim])."""
-        x, t, y = self._make_training_data(latents)
-        n_total = x.shape[0]
+    def fit(
+        self,
+        latents: jnp.ndarray,
+        val_split: float = 0.2,
+        verbose: bool = True,
+    ) -> "LatentDiffusion":
+        """Train the score network on `latents` (shape [N, latent_dim]).
 
-        # Early stopping state
-        best_loss = float('inf')
+        Parameters
+        ----------
+        latents   : array of shape [N, latent_dim]
+        val_split : fraction of *original latent rows* held out for
+                    validation before the forward-diffusion data is built.
+                    Early stopping is driven by validation loss, not
+                    training loss.
+        verbose   : print per-epoch progress
+        """
+        n_latents = latents.shape[0]
+
+        # ---- split the raw latents BEFORE forward-diffusion ----
+        # (so train/val never share the same underlying (s, z) row,
+        #  even though each row is expanded into n_steps noised copies)
+        self.key, split_key = jax.random.split(self.key)
+        perm = jax.random.permutation(split_key, n_latents)
+        n_val = max(1, int(round(val_split * n_latents)))
+        val_idx, train_idx = perm[:n_val], perm[n_val:]
+
+        latents_tr = latents[train_idx]
+        latents_va = latents[val_idx]
+
+        if verbose:
+            print(f"  [diffusion] train/val split: {latents_tr.shape[0]} / {latents_va.shape[0]} latent rows")
+
+        # Build forward-diffusion training data for each split.
+        # Each call advances self.key, so train and val get independent noise draws.
+        x_tr, t_tr, y_tr = self._make_training_data(latents_tr)
+        x_va, t_va, y_va = self._make_training_data(latents_va)
+        n_train = x_tr.shape[0]
+        n_val_rows = x_va.shape[0]
+
+        # Early stopping state — now tracked on VALIDATION loss
+        best_val_loss = float('inf')
         best_params = None
         epochs_without_improvement = 0
 
-        for epoch in range(self.n_epochs):
-            self.key, perm_key = jax.random.split(self.key)
-            perm = jax.random.permutation(perm_key, n_total)
-            epoch_loss, n_batches = 0.0, 0
+        # History for convergence diagnostics
+        self.history_ = {"train_loss": [], "val_loss": []}
 
-            for start in range(0, n_total, self.batch_size):
-                idx = perm[start : start + self.batch_size]
-                epoch_loss += self._train_step(x[idx], t[idx], y[idx])
+        for epoch in range(self.n_epochs):
+            # ---- training pass ----
+            self.key, perm_key = jax.random.split(self.key)
+            perm_tr = jax.random.permutation(perm_key, n_train)
+            epoch_train_loss, n_batches = 0.0, 0
+
+            for start in range(0, n_train, self.batch_size):
+                idx = perm_tr[start : start + self.batch_size]
+                epoch_train_loss += self._train_step(x_tr[idx], t_tr[idx], y_tr[idx])
                 n_batches += 1
 
-            avg_loss = epoch_loss / n_batches
+            avg_train_loss = epoch_train_loss / max(n_batches, 1)
+
+            # ---- validation pass (no gradient updates) ----
+            epoch_val_loss, n_val_batches = 0.0, 0
+            for start in range(0, n_val_rows, self.batch_size):
+                epoch_val_loss += self._eval_step(
+                    x_va[start : start + self.batch_size],
+                    t_va[start : start + self.batch_size],
+                    y_va[start : start + self.batch_size],
+                )
+                n_val_batches += 1
+            avg_val_loss = epoch_val_loss / max(n_val_batches, 1)
+
+            self.history_["train_loss"].append(avg_train_loss)
+            self.history_["val_loss"].append(avg_val_loss)
 
             if verbose and epoch % 10 == 0:
-                print(f"  [diffusion] epoch {epoch:3d}  loss={avg_loss:.6f}  best={best_loss:.6f}  patience={epochs_without_improvement}/{self.patience}")
+                print(
+                    f"  [diffusion] epoch {epoch:3d}  "
+                    f"train_loss={avg_train_loss:.6f}  val_loss={avg_val_loss:.6f}  "
+                    f"best_val={best_val_loss:.6f}  patience={epochs_without_improvement}/{self.patience}"
+                )
 
-            # Early stopping check
-            if avg_loss < best_loss - self.min_delta:
-                best_loss = avg_loss
+            # ---- early stopping on VALIDATION loss ----
+            if avg_val_loss < best_val_loss - self.min_delta:
+                best_val_loss = avg_val_loss
                 best_params = nnx.state(self.network)   # snapshot best weights
                 epochs_without_improvement = 0
             else:
                 epochs_without_improvement += 1
                 if epochs_without_improvement >= self.patience:
                     if verbose:
-                        print(f"  [diffusion] early stopping at epoch {epoch}  best_loss={best_loss:.6f}")
+                        print(
+                            f"  [diffusion] early stopping at epoch {epoch}  "
+                            f"best_val_loss={best_val_loss:.6f}"
+                        )
                     nnx.update(self.network, best_params)  # restore best weights
                     break
+        else:
+            # Loop completed all n_epochs without early stopping —
+            # still restore the best validation checkpoint rather than
+            # whatever the final epoch happened to land on.
+            if best_params is not None:
+                if verbose:
+                    print(
+                        f"  [diffusion] reached n_epochs={self.n_epochs}; "
+                        f"restoring best_val_loss={best_val_loss:.6f}"
+                    )
+                nnx.update(self.network, best_params)
 
         return self
+
+    def plot_convergence(self, ax=None):
+        """Plot train vs. validation loss curves from the last `fit()` call."""
+        import matplotlib.pyplot as plt
+
+        if not hasattr(self, "history_"):
+            raise RuntimeError("Call `fit()` before `plot_convergence()`.")
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=(6, 4))
+
+        epochs = range(len(self.history_["train_loss"]))
+        ax.plot(epochs, self.history_["train_loss"], label="train loss")
+        ax.plot(epochs, self.history_["val_loss"], label="val loss")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("score-matching MSE")
+        ax.set_title("Diffusion training convergence")
+        ax.legend()
+        ax.grid(alpha=0.3)
+        return ax
 
     def sample(self, n_samples: int) -> jnp.ndarray:
         """Draw `n_samples` latent vectors via DDIM."""
