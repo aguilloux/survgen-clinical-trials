@@ -186,7 +186,7 @@ class HIVAE(nn.Module):
         batch_miss,
         tau: float = 1.0,
         n_generated_dataset: int = 1,
-        diffusion_hidden_dim: int = 256,
+        diffusion_hidden_dim: int = 32,
         diffusion_n_steps: int = 100,
         diffusion_n_epochs: int = 200,
         diffusion_batch_size: int = 2000,
@@ -221,6 +221,7 @@ class HIVAE(nn.Module):
             lr=diffusion_lr,
         )
         diffusion.fit(latents_np)
+        # diffusion.plot_convergence()
 
         # ── 3. Sample new latents & convert to torch ──────────────────
         diffusion_samples = diffusion.sample(n_generated_sample)

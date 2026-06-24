@@ -607,7 +607,7 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_
 
     if "_diffusion" in generator_name:
         hp_space.append(CategoricalDistribution(name="diffusion_lr", choices=[1e-4, 2e-4, 1e-3, 2e-3, 3e-3, 5e-3]))
-        hp_space.append(IntegerDistribution(name="diffusion_hidden_dim", low=10, high=200, step=10))
+        hp_space.append(IntegerDistribution(name="diffusion_hidden_dim", low=10, high=100, step=10))
         hp_space.append(CategoricalDistribution(name="diffusion_batch_size", choices=get_diffusion_batchsize(n_diffusion_samples)))
 
     if tune_params is not None:

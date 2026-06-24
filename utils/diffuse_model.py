@@ -17,16 +17,14 @@ class LatentDiffusionNetwork(nnx.Module):
     def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, rngs: nnx.Rngs):
         self.linear1 = nnx.Linear(in_dim, hidden_dim, rngs=rngs)
         self.linear2 = nnx.Linear(hidden_dim, hidden_dim, rngs=rngs)
-        self.linear3 = nnx.Linear(hidden_dim, hidden_dim, rngs=rngs)
-        self.linear4 = nnx.Linear(hidden_dim, out_dim, rngs=rngs)
+        self.linear3 = nnx.Linear(hidden_dim, out_dim, rngs=rngs)
 
     def __call__(self, x, t):
         t_col = t.reshape((-1, 1)) if x.ndim > 1 else jnp.atleast_1d(t)
         z = jnp.concatenate((x, t_col), axis=-1)
         z = nnx.relu(self.linear1(z))
         z = nnx.relu(self.linear2(z))
-        z = nnx.relu(self.linear3(z))
-        return self.linear4(z)
+        return self.linear3(z)
 
 
 class LatentDiffusion:
@@ -55,13 +53,13 @@ class LatentDiffusion:
     def __init__(
         self,
         latent_dim: int,
-        hidden_dim: int = 256,
+        hidden_dim: int = 32,
         n_steps: int = 100,
         n_epochs: int = 1000,
         batch_size: int = 512,
         lr: float = 1e-3,
         seed: int = 0,
-        patience: int = 5,
+        patience: int = 20,
         min_delta: float = 1e-6,
     ):
         self.latent_dim = latent_dim
