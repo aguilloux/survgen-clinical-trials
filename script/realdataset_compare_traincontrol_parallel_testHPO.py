@@ -126,6 +126,9 @@ def run(dataset_name, generators_sel, method_HPO):
             list_df_gen_control.append(df_gen_control_j)
             data_syn.append(pd.concat([df_init_treated, df_gen_control_j], ignore_index=True))
 
+        df_gen_control = pd.concat(list_df_gen_control)
+        df_gen_control.to_csv(parent_path + "/dataset/" + dataset_name + f'/metric_results_{optuna_version_name}/syn_df_{generator_name}.csv', index=False)
+
         df_gen_control_dict[generator_name] = list_df_gen_control
         df_syn_dict[generator_name] = data_syn
 
