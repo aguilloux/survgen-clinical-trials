@@ -42,7 +42,7 @@ def get_args(argv = None):
     
     return parser.parse_args(argv)
 
-def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None):
+def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None, return_cat_mapping=False):
     """
     Reads data from CSV files, handles missing values, and applies necessary transformations.
 
@@ -63,6 +63,10 @@ def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None):
     surv_type : str, default=None
         Type identifier for the survival outcome.
 
+    return_cat_mapping : bool, default=False
+        If True, additionally return a dict mapping each 'cat' feature name to its
+        {original_value: integer_code} mapping.
+
     Returns:
     --------
     data : torch.Tensor
@@ -79,6 +83,11 @@ def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None):
     
     n_samples : int
         The number of samples in the dataset.
+
+    cat_mapping : dict
+        Only returned when return_cat_mapping=True. Maps each 'cat' feature name to a
+        {original_value: integer_code} dict, with codes assigned in sorted/alphabetical
+        order (the same ordering the one-hot encoder derives via torch.unique).
     """
     
     # Read types of data from types file
@@ -87,12 +96,32 @@ def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None):
     if surv_type is not None:
         for i in range(len(types_dict)):
             if types_dict[i]["name"] == "survcens":
-                types_dict[i]["type"] == surv_type
+                types_dict[i]["type"] = surv_type
 
-    # Read data from input file and convert to PyTorch tensor
-    with open(data_file, 'r') as f:
-        data = [[float(x) for x in rec] for rec in csv.reader(f, delimiter=',')]
-        data = torch.tensor(data, dtype=torch.float32)
+    # Read data from input file. Categorical ('cat') columns may hold text labels, which
+    # are mapped to integer codes 0..k-1 in sorted/alphabetical order -- the same ordering
+    # the one-hot encoder below derives via torch.unique. NaNs are preserved so the
+    # missing-value handling further down is unaffected.
+    raw = pd.read_csv(data_file, header=None)
+
+    cat_mapping = {}
+    col = 0
+    for feature in types_dict:
+        if feature['type'] == 'cat':
+            codes, uniques = pd.factorize(raw[col], sort=True)
+            codes = codes.astype(np.float32)
+            codes[codes == -1] = np.nan  # restore missing values dropped by factorize
+            raw[col] = codes
+            cat_mapping[feature['name']] = {
+                (v.item() if hasattr(v, 'item') else v): i for i, v in enumerate(uniques)
+            }
+            col += 1
+        elif feature['type'] in ['surv', 'surv_weibull', 'surv_loglog', 'surv_piecewise']:
+            col += 2  # survival outcome occupies two columns
+        else:
+            col += 1
+
+    data = torch.tensor(raw.to_numpy(dtype=np.float32), dtype=torch.float32)
     
     # Handle true missing values if provided
     if true_miss_file:
@@ -188,6 +217,8 @@ def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None):
         if missing_positions.numel() != 0:
             miss_mask[missing_positions[:, 0] - 1, missing_positions[:, 1] - 1] = 0  # CSV indexes start at 1
     
+    if return_cat_mapping:
+        return df, types_dict, miss_mask, true_miss_mask, n_samples, cat_mapping
     return df, types_dict, miss_mask, true_miss_mask, n_samples
 
 
@@ -623,12 +654,164 @@ def encode_and_bind(df, feature):
         pd.DataFrame: Modified DataFrame with encoding applied.
     """
     unique_values = df[feature].nunique()
-    
+
     if unique_values > 2:
         dummies = pd.get_dummies(df[feature], drop_first=True, prefix=feature, prefix_sep='')
         df = pd.concat([df.drop(columns=[feature]), dummies], axis=1)
-        
+
     return df
+
+
+def infer_rounding_step(values, coverage=0.999, rtol=1e-6, candidates=None):
+    """
+    Infers the coarsest grid step on which (nearly) all of `values` lie.
+
+    Returns the largest candidate step `s` such that at least `coverage`
+    fraction of the observed values fall within `rtol * s` of an integer
+    multiple of `s`. The default candidate set covers powers of ten and the
+    1/2, 1/4, 1/5 fractional grids (e.g. ..., 5, 2.5, 2, 1, 0.5, 0.25, 0.2,
+    0.1, ...), so multiples-of-5/10 grids are detected as well.
+
+    The `coverage` threshold is what makes this robust to a handful of
+    odd values: with coverage=1.0 a couple of irregular rows force a very
+    fine step, whereas coverage slightly below 1 (e.g. 0.99) treats those
+    rows as noise and recovers the human-meaningful grid.
+
+    Parameters
+    ----------
+    values : array-like or pandas.Series
+        The column of values to inspect. NaNs/infs are ignored.
+    coverage : float, default=0.999
+        Minimum fraction of values that must lie on a candidate grid for
+        that grid to be accepted (0 < coverage <= 1).
+    rtol : float, default=1e-6
+        Relative tolerance: a value `x` counts as on-grid for step `s`
+        when ``abs(x/s - round(x/s)) <= rtol``.
+    candidates : sequence of float or None, default=None
+        Explicit candidate steps to test. When None, a default set spanning
+        1e6 down to 1e-6 times {1, 1/2, 1/4, 1/5} is used. Pass your own
+        (e.g. including 1/3) to encode domain-specific grids.
+
+    Returns
+    -------
+    float or None
+        The inferred grid step, or None when the column is empty or no
+        candidate explains it (i.e. it looks continuous and should not be
+        snapped).
+    """
+    x = np.asarray(values, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return None
+
+    if candidates is None:
+        mantissas = [1.0, 0.5, 0.25, 0.2]                 # 1, 1/2, 1/4, 1/5
+        candidates = sorted({m * 10.0 ** e                # coarsest first
+                             for e in range(6, -7, -1) for m in mantissas},
+                            reverse=True)
+
+    for step in candidates:
+        q = x / step
+        if np.mean(np.abs(q - np.round(q)) <= rtol) >= coverage:
+            return step
+    return None
+
+
+def infer_rounding_steps(df, cols=None, **kwargs):
+    """
+    Convenience wrapper applying `infer_rounding_step` to several columns.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame holding the columns to inspect.
+    cols : sequence of str or None, default=None
+        Column names to process. When None, every column in `df` is used.
+    **kwargs
+        Forwarded to `infer_rounding_step` (e.g. coverage, rtol, candidates).
+
+    Returns
+    -------
+    dict
+        Mapping of column name to its inferred grid step (or None when no
+        step explains the column).
+    """
+    if cols is None:
+        cols = df.columns
+    return {c: infer_rounding_step(df[c], **kwargs) for c in cols}
+
+
+def round_to_initial_grid(df, round_step, round_floor=None):
+    """
+    Snaps continuous columns of `df` onto a precision grid.
+
+    Each column named in `round_step` is rounded to the nearest multiple of
+    its step and, when a floor is supplied, clamped to that lower bound so
+    rounding cannot push a value out of its valid domain (e.g. a tiny
+    generated 'time' rounding down past the smallest real value). Columns
+    absent from `round_step` are left untouched.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data to round. Not modified in place; a copy is returned.
+    round_step : dict
+        Mapping of column name to grid step, as produced by
+        `infer_rounding_steps`.
+    round_floor : dict or None, default=None
+        Mapping of column name to a lower bound applied after rounding.
+        When None, no clamping is performed; columns missing from the dict
+        are not clamped.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of `df` with the listed columns snapped to their grid.
+    """
+    out = df.copy()
+    for col, step in round_step.items():
+        if step is None:
+            continue
+        out[col] = np.round(out[col] / step) * step
+        if round_floor is not None and col in round_floor:
+            out[col] = out[col].clip(lower=round_floor[col])
+    return out
+
+
+def decode_categoricals(df, cat_mapping, cols=None):
+    """
+    Maps categorical columns from integer codes back to their original values.
+
+    Inverts the {original_value: integer_code} mapping produced by
+    `read_data(..., return_cat_mapping=True)` and applies it, restoring
+    HIVAE-decoded integer codes (0..k-1) to the dataset's original category
+    labels (e.g. karnof 0/1/2/3 -> 70/80/90/100, raceth 0..3 -> 1..4).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data whose categorical columns hold integer codes. Not modified in
+        place; a copy is returned.
+    cat_mapping : dict
+        Mapping of column name to a {original_value: integer_code} dict, as
+        returned by `read_data` with return_cat_mapping=True.
+    cols : sequence of str or None, default=None
+        Subset of `cat_mapping` columns to decode. When None, every column in
+        `cat_mapping` that is also present in `df` is decoded.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of `df` with the selected categorical columns mapped back to
+        their original values.
+    """
+    out = df.copy()
+    if cols is None:
+        cols = [c for c in cat_mapping if c in df.columns]
+    for col in cols:
+        decode = {code: original for original, code in cat_mapping[col].items()}
+        out[col] = out[col].round().astype(int).map(decode)
+    return out
 
 
 
