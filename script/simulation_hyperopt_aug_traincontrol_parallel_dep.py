@@ -36,7 +36,7 @@ def run(generator_name):
     # independent = True
     independent = False
     data_types_create = True
-    seed_optuna = 11 # 10
+    seed_optuna = 10 # 10
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
     treatment_effect = 0.0 # Treatment effect on the treated group for hyperopt
@@ -124,7 +124,8 @@ def run(generator_name):
         df_init = pd.concat([df_init_control, df_init_treated], ignore_index=True)
        
         # Parameters of the optuna study
-        metric_optuna = "survival_km_distance" # metric to optimize in optuna
+        HPO_version = "external_metrics"
+        metric_optuna = "detection_xgb" # metric to optimize in optuna
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
@@ -136,7 +137,14 @@ def run(generator_name):
                         "Surv-GAN" : surv_gan,
                         "Surv-VAE" : surv_vae, 
                         "HI-VAE_weibull_prior" : surv_hivae, 
-                        "HI-VAE_piecewise_prior" : surv_hivae}
+                        "HI-VAE_piecewise_prior" : surv_hivae,
+                        "HI-VAE_weibull_DP" : surv_hivae, 
+                        "HI-VAE_piecewise_DP" : surv_hivae, 
+                        "HI-VAE_weibull_diffusion": surv_hivae, 
+                        "HI-VAE_piecewise_diffusion": surv_hivae,
+                        "HI-VAE_weibull_diffusion_DP": surv_hivae, 
+                        "HI-VAE_piecewise_diffusion_DP": surv_hivae
+                        }
         
         # Create directories for optuna results
         if not os.path.exists(parent_path + "/dataset/" + dataset_name + "/optuna_results"):
@@ -155,7 +163,11 @@ def run(generator_name):
 
         os.chdir(work_dir)  # Switch to private work dir
 
-        if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
+        if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise", 
+                            "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior", 
+                            "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP",
+                            "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion", 
+                            "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"]:
             feat_types_dict_ext = feat_types_dict.copy()
             for i in range(len(feat_types_dict)):
                 if feat_types_dict_ext[i]['name'] == "survcens":
@@ -165,26 +177,33 @@ def run(generator_name):
                         feat_types_dict_ext[i]["type"] = 'surv'
                     else:
                         feat_types_dict_ext[i]["type"] = 'surv_piecewise'
-            if generator_name in ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
-                gen_from_prior = True
-            else:
-                gen_from_prior = False
+            gen_from_prior = "_prior" in generator_name
+            differential_privacy = "_DP" in generator_name
+            diffusion = "_diffusion" in generator_name
             best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(df_init_control_encoded,
-                                                                                            miss_mask_control, 
-                                                                                            true_miss_mask_control,
-                                                                                            feat_types_dict_ext, 
-                                                                                            n_generated_dataset, 
-                                                                                            n_splits=n_splits,
-                                                                                            n_trials=n_trials, 
-                                                                                            columns=fnames,
-                                                                                            generator_name=generator_name,
-                                                                                            epochs=10000,
-                                                                                            metric=metric_optuna,
-                                                                                            study_name=study_name, 
-                                                                                            method=method_hyperopt, 
-                                                                                            gen_from_prior=gen_from_prior, 
-                                                                                            n_generated_sample=treated.shape[0], 
-                                                                                            seed=seed_optuna)
+                                                                                                miss_mask_control, 
+                                                                                                true_miss_mask_control,
+                                                                                                feat_types_dict_ext, 
+                                                                                                n_generated_dataset, 
+                                                                                                n_splits=n_splits,
+                                                                                                n_trials=n_trials, 
+                                                                                                columns=fnames,
+                                                                                                generator_name=generator_name,
+                                                                                                metric=metric_optuna,
+                                                                                                study_name=study_name, 
+                                                                                                method=method_hyperopt, 
+                                                                                                gen_from_prior=gen_from_prior,
+                                                                                                seed=seed_optuna,
+                                                                                                target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
+                                                                                                target_delta=1e-5,
+                                                                                                tune_params=None, # if None, the function will use the default hyperparameters to tune,
+                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": treated.shape[0]}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                norm_mode="global",
+                                                                                                screening_epochs=800,
+                                                                                                n_startup_trials=20,
+                                                                                                differential_privacy=differential_privacy, 
+                                                                                                diffusion=diffusion, 
+                                                                                                do_prune=False)
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study
             with open(best_params_file, "w") as f:
@@ -200,7 +219,7 @@ def run(generator_name):
                                                                                             metric=metric_optuna,
                                                                                             study_name=study_name, 
                                                                                             method=method_hyperopt, 
-                                                                                            n_generated_sample=treated.shape[0],
+                                                                                            n_generated_sample=treated.shape[0], 
                                                                                             seed=seed_optuna)
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study
@@ -224,8 +243,9 @@ def setup_unique_working_dir(base_dir="experiments"):
   
 
 if __name__ == "__main__":
-    # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE"] 
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
-    # generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
+                      "Surv-GAN", "Surv-VAE", 
+                      "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                      "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP"]
     generator_id = int(sys.argv[1])
     run(generators_sel[generator_id])
