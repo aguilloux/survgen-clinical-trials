@@ -171,7 +171,7 @@ def run(generator_name):
             feat_types_dict_ext = feat_types_dict.copy()
             for i in range(len(feat_types_dict)):
                 if feat_types_dict_ext[i]['name'] == "survcens":
-                    if generator_name in ["HI-VAE_weibull", "HI-VAE_weibull_prior"]:
+                    if "HI-VAE_weibull" in generator_name:
                         feat_types_dict_ext[i]["type"] = 'surv_weibull'
                     elif generator_name in ["HI-VAE_lognormal"]:
                         feat_types_dict_ext[i]["type"] = 'surv'
