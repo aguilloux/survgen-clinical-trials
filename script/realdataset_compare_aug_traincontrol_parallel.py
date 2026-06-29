@@ -96,7 +96,7 @@ def run(dataset_name, generators_sel):
         # Parameters of the optuna study
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
         name_config = dataset_name
-        method_HPO = "Kmap_SurvDist"
+        method_HPO = "DetectXGB"
         optuna_version_name = method_HPO
         n_trials = 150
 
@@ -153,7 +153,8 @@ def run(dataset_name, generators_sel):
                                                                                             params=best_params,
                                                                                             gen_from_prior=gen_from_prior,
                                                                                             n_generated_sample=n_generated_samples_control,
-                                                                                            diffusion=diffusion)
+                                                                                            diffusion=diffusion,
+                                                                                            apply_rounding=True)
             else:
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                                             target_column="censor",

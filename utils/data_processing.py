@@ -777,6 +777,48 @@ def round_to_initial_grid(df, round_step, round_floor=None):
             out[col] = out[col].clip(lower=round_floor[col])
     return out
 
+def _round_column(data_gen_round, feat_idx, series, coverage=0.99):
+    """
+    Infers the rounding grid of `series` and snaps
+    `data_gen_round[:, feat_idx]` onto it, clipped to the series' min.
+    No-op if no grid step is detected.
+    """
+    step = infer_rounding_step(series, coverage=coverage)
+    if step is None:
+        return
+    round_floor = series.min()
+    col = data_gen_round[:, feat_idx]
+    col = np.round(col / step) * step
+    data_gen_round[:, feat_idx] = col.clip(min=round_floor)
+
+
+def round_data_gen(data_org, data_gen, feat_types_dict):
+    """
+    Rounds generated columns onto the precision grid inferred from the
+    corresponding original (real) columns.
+
+    Survival feature types occupy two tensor columns (time, event) but only
+    the time column (first one) is rounded. 'pos'/'real' types occupy one
+    column and are rounded directly. Any other feature type is assumed to
+    occupy a single column and is left untouched.
+    """
+    data_gen_round = data_gen.clone()
+    feat_idx = 0
+    for d in feat_types_dict:
+        ftype = d['type']
+
+        if ftype in ['surv','surv_weibull','surv_loglog', 'surv_piecewise']:
+            _round_column(data_gen_round, feat_idx, data_org[:, feat_idx])
+            feat_idx += 2
+        elif ftype in ['pos', 'real']:
+            _round_column(data_gen_round, feat_idx, data_org[:, feat_idx])
+            feat_idx += 1
+        else:
+            # Categorical / other types: nothing to round, but still
+            # advance past this column.
+            feat_idx += 1
+
+    return data_gen_round
 
 def decode_categoricals(df, cat_mapping, cols=None):
     """

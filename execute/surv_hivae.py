@@ -239,7 +239,7 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
 # GENERATION FUNCTIONS: with conditioning on a feature value.
 # ───────────────────────────────────────────────────────────
 
-def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, condition={'var': "treatment", 'value': 0.0, 'n_samples': 300}):
+def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, condition={'var': "treatment", 'value': 0.0, 'n_samples': 300}, apply_rounding=False):
     """
         Generation from a trained HIVAE, with optional conditioning on a feature value. 
         If `condition` is not None, generation is repeated until `condition['n_samples']` samples matching the condition are obtained for each generated dataset. 
@@ -307,6 +307,9 @@ def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat
                 est_data = est_data_gen[j][est_data_gen[j][:, cond_feature_idx] == condition["value"]]
                 data_trans = data_processing.discrete_variables_transformation(est_data, feat_types_dict)
                 data_trans = data_processing.survival_variables_transformation(data_trans, feat_types_dict)
+                if apply_rounding:
+                    data_org_trans = data_processing.discrete_variables_transformation(torch.from_numpy(df.values), feat_types_dict)
+                    data_trans = data_processing.round_data_gen(data_org_trans, data_trans, feat_types_dict)
                 if i == 0:
                     est_data_gen_transformed.append(data_trans.unsqueeze(0))
                 else:
@@ -326,7 +329,7 @@ def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat
 # GENERATION FUNCTIONS: without conditioning on a feature value.
 # ──────────────────────────────────────────────────────────────
  
-def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffusion=False, diffusion_params=None):
+def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffusion=False, diffusion_params=None, apply_rounding=False):
     """
         Generation from a trained HIVAE, without conditioning. 
         If `n_generated_sample` is specified, generation is performed on an extended dataset of that size (with samples drawn with replacement from the original data) 
@@ -387,6 +390,9 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
         for j in range(n_generated_dataset):
             data_trans = data_processing.discrete_variables_transformation(est_data_gen[j], feat_types_dict)
             data_trans = data_processing.survival_variables_transformation(data_trans, feat_types_dict)
+            if apply_rounding:
+                data_org_trans = data_processing.discrete_variables_transformation(data, feat_types_dict)
+                data_trans = data_processing.round_data_gen(data_org_trans, data_trans, feat_types_dict)
             est_data_gen_transformed.append(data_trans.unsqueeze(0))
             
         est_data_gen_transformed = torch.cat(est_data_gen_transformed, dim=0)
@@ -454,7 +460,7 @@ def _validate_norm_mode(norm_mode, differential_privacy):
 def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
         n_generated_sample=None, params=None, verbose=True, plot=False, 
         gen_from_prior=False, condition=None, differential_privacy=False,
-        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False,
+        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False, apply_rounding=False,
         **hp_overrides):
     """
         End-to-end entry point: build a HIVAE, train it on `df`, and generate `n_generated_dataset` synthetic datasets.
@@ -511,17 +517,17 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
         est_data_gen_transformed_list = []
         for n_generated_sample_ in n_generated_sample:
             if condition is not None:
-                est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, condition=condition)
+                est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
             else:
-                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion)
+                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
     else:
         if condition is not None:
-            est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition)
+            est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
         else:
-            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion)
+            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding)
 
         if plot:
             loss_track = {"epoch": list(range(1, len(loss_train) + 1)),
@@ -791,7 +797,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                  target_epsilon=None, target_delta=1e-5, tune_epsilon=False,
                                  tune_params=None, fixed_params=None, norm_mode="global",
                                  screening_epochs=800, n_startup_trials=20, 
-                                 differential_privacy=False, diffusion=False, do_prune=False):
+                                 differential_privacy=False, diffusion=False, do_prune=False, apply_rounding=False):
     
     # differential_privacy = "_DP" in generator_name
     if tune_epsilon and not differential_privacy:
@@ -878,7 +884,9 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                         diffusion_params = {}
                     est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask,
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
-                                                                   n_generated_sample=n_gen_sample, from_prior=gen_from_prior, diffusion=diffusion, diffusion_params=diffusion_params)
+                                                                   n_generated_sample=n_gen_sample, from_prior=gen_from_prior,
+                                                                   diffusion=diffusion, diffusion_params=diffusion_params,
+                                                                   apply_rounding=apply_rounding)
                     scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
                     
             # ----------------------------------------------------------

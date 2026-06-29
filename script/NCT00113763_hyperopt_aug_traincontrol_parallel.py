@@ -169,7 +169,8 @@ def run(generator_name):
                                                                                                 n_startup_trials=20,
                                                                                                 differential_privacy=differential_privacy,
                                                                                                 diffusion=diffusion,
-                                                                                                do_prune=False)
+                                                                                                do_prune=False,
+                                                                                                apply_rounding=True)
             elif HPO_version == "validation_loss":
                 best_params_HIVAE, study = generators_dict[generator_name].optuna_hyperparameter_search_HIVAE_loss(df_init_control_encoded,
                                                                                                                 miss_mask_control,
