@@ -98,30 +98,35 @@ def read_data(data_file, types_file, miss_file, true_miss_file, surv_type=None, 
             if types_dict[i]["name"] == "survcens":
                 types_dict[i]["type"] = surv_type
 
-    # Read data from input file. Categorical ('cat') columns may hold text labels, which
-    # are mapped to integer codes 0..k-1 in sorted/alphabetical order -- the same ordering
-    # the one-hot encoder below derives via torch.unique. NaNs are preserved so the
-    # missing-value handling further down is unaffected.
-    raw = pd.read_csv(data_file, header=None)
+    if return_cat_mapping:
+        # Read data from input file. Categorical ('cat') columns may hold text labels, which
+        # are mapped to integer codes 0..k-1 in sorted/alphabetical order -- the same ordering
+        # the one-hot encoder below derives via torch.unique. NaNs are preserved so the
+        # missing-value handling further down is unaffected.
+        raw = pd.read_csv(data_file, header=None)
 
-    cat_mapping = {}
-    col = 0
-    for feature in types_dict:
-        if feature['type'] == 'cat':
-            codes, uniques = pd.factorize(raw[col], sort=True)
-            codes = codes.astype(np.float32)
-            codes[codes == -1] = np.nan  # restore missing values dropped by factorize
-            raw[col] = codes
-            cat_mapping[feature['name']] = {
-                (v.item() if hasattr(v, 'item') else v): i for i, v in enumerate(uniques)
-            }
-            col += 1
-        elif feature['type'] in ['surv', 'surv_weibull', 'surv_loglog', 'surv_piecewise']:
-            col += 2  # survival outcome occupies two columns
-        else:
-            col += 1
+        cat_mapping = {}
+        col = 0
+        for feature in types_dict:
+            if feature['type'] == 'cat':
+                codes, uniques = pd.factorize(raw[col], sort=True)
+                codes = codes.astype(np.float32)
+                codes[codes == -1] = np.nan  # restore missing values dropped by factorize
+                raw[col] = codes
+                cat_mapping[feature['name']] = {
+                    (v.item() if hasattr(v, 'item') else v): i for i, v in enumerate(uniques)
+                }
+                col += 1
+            elif feature['type'] in ['surv', 'surv_weibull', 'surv_loglog', 'surv_piecewise']:
+                col += 2  # survival outcome occupies two columns
+            else:
+                col += 1
 
-    data = torch.tensor(raw.to_numpy(dtype=np.float32), dtype=torch.float32)
+        data = torch.tensor(raw.to_numpy(dtype=np.float32), dtype=torch.float32)
+    else:
+        with open(data_file, 'r') as f:
+            data = [[float(x) for x in rec] for rec in csv.reader(f, delimiter=',')]
+            data = torch.tensor(data, dtype=torch.float32)
     
     # Handle true missing values if provided
     if true_miss_file:
