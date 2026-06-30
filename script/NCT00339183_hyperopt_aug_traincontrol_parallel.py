@@ -80,7 +80,7 @@ def run(generator_name):
         df_init_control["treatment"] = 0
        
         # Parameters of the optuna study
-        method_HPO = "Kmap_SurvDist"
+        method_HPO = "DetectXGB"
         optuna_version_name = method_HPO
         if method_HPO == "ValLoss":
             HPO_version = "validation_loss" # "external_metrics" or "validation_loss"
@@ -213,7 +213,9 @@ def run(generator_name):
                                                                                                 metric=metric_optuna,
                                                                                                 study_name=study_name,
                                                                                                 method=method_hyperopt,
-                                                                                                n_generated_sample=n_generated_samples_control)
+                                                                                                n_generated_sample=n_generated_samples_control,
+                                                                                                apply_rounding=True,
+                                                                                                feat_types_dict=feat_types_dict)
             elif HPO_version == "validation_loss":
                 raise NotImplementedError("HPO based on validation loss is not implemented yet for Surv-GAN and Surv-VAE.")
             else:

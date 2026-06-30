@@ -161,7 +161,9 @@ def run(dataset_name, generators_sel):
                                                                                             time_to_event_column="time", 
                                                                                             n_generated_dataset=n_generated_dataset, 
                                                                                             params=best_params,
-                                                                                            n_generated_sample=n_generated_samples_control)
+                                                                                            n_generated_sample=n_generated_samples_control,
+                                                                                            apply_rounding=True,
+                                                                                            feat_types_dict=feat_types_dict)
 
         # Convert generated data into dataframe
         df_gen_control_dict = {}
@@ -233,10 +235,12 @@ def run(dataset_name, generators_sel):
 
 
 if __name__ == "__main__":
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
-                      "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
-                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+    # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
+    #                   "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+    #                   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+    generators_sel = ["Surv-GAN"]
     dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
-    dataset_id = int(sys.argv[1])
+    # dataset_id = int(sys.argv[1])
+    dataset_id = 0
     dataset_name = dataset_sel[dataset_id]
     run(dataset_name , generators_sel)

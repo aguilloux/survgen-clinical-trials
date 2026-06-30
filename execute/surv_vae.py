@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 module_path = Path.cwd().parent / 'utils'
 sys.path.append(str(module_path))
-import metrics
+import metrics, data_processing
 import numpy as np
 import optuna
 import os
@@ -83,7 +83,7 @@ def generate_survae(model, n_generated_dataset, n_generated_sample, target_colum
     return est_data_gen_transformed_survae
 
 
-def run(data, columns, target_column, time_to_event_column, n_generated_dataset, n_generated_sample=None, params=None, condition=None):
+def run(data, columns, target_column, time_to_event_column, n_generated_dataset, n_generated_sample=None, params=None, condition=None, apply_rounding=False, feat_types_dict=None):
     # condition={'var': "treatment", 'value': 0.0, 'n_samples': 300}
     """
     Use a VAE for tabular data generation
@@ -113,11 +113,16 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
 
         return est_data_gen_transformed_survae_list
     else:
+        # TODO; Apply rounding only here
         if n_generated_sample is None:
             n_generated_sample = data.shape[0]
         est_data_gen_transformed_survae = generate_survae(model_survae, n_generated_dataset, n_generated_sample, target_column, time_to_event_column, condition)
-    
-        return est_data_gen_transformed_survae
+        est_data_gen_transformed_survae_rounded = []
+        if apply_rounding:
+            for j in range(n_generated_dataset):
+                est_data_gen_transformed_survae_rounded_j = data_processing.round_data_gen(df.values, torch.from_numpy(est_data_gen_transformed_survae[j].numpy()), feat_types_dict)
+                est_data_gen_transformed_survae_rounded.append(est_data_gen_transformed_survae_rounded_j)
+        return est_data_gen_transformed_survae_rounded
     
 def _evaluate_generation(gen_data, ref_loader, metrics_list):
     metrics_dict_evaluation, metrics_synthcity, expected_metrics = metrics.map_metrics_HPO(metrics_list)
@@ -147,7 +152,9 @@ def _evaluate_generation(gen_data, ref_loader, metrics_list):
     return scores
    
 
-def optuna_hyperparameter_search(data, columns, target_column, time_to_event_column, n_generated_dataset, n_splits, n_trials, n_generated_sample=None, study_name='optuna_study_survae', metric='survival_km_distance', method='', condition=None, cond_df=None, seed=10):
+def optuna_hyperparameter_search(data, columns, target_column, time_to_event_column, n_generated_dataset, n_splits, n_trials,
+                                 n_generated_sample=None, study_name='optuna_study_survae', metric='survival_km_distance',
+                                 method='', condition=None, cond_df=None, seed=10, apply_rounding=False, feat_types_dict=None):
     
     df = pd.DataFrame(data.numpy(), columns=columns) # Preprocessed dataset
     if condition is not None and cond_df is not None:
@@ -182,6 +189,10 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                     # clear_cache()
 
                     gen_data = run_with_timeout_mp(model_survae, params, full_data_loader, n_gen_sample*n_generated_dataset, timeout=120)
+                    if apply_rounding:
+                        out_rounded = data_processing.round_data_gen(df.values, torch.from_numpy(gen_data.numpy()), feat_types_dict)
+                        out_df = pd.DataFrame(out_rounded, columns=columns) # Preprocessed dataset
+                        gen_data = SurvivalAnalysisDataLoader(out_df, target_column=target_column, time_to_event_column=time_to_event_column)
                     scores = _evaluate_generation(gen_data, full_data_loader, metrics_list)
                 else:
                     est_data_gen_transformed_survae = []
