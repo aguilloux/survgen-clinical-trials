@@ -357,7 +357,8 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
         'performance': ['feat_rank_distance'],
         'detection': ['detection_xgb'],
         'privacy': ['k-map', 'distinct l-diversity', 'identifiability_score']
-    }, include_nndr=True):
+    }, include_nndr=True, include_tableone_min_p_value=False, categorical=None,
+    continuous=None, nonnormal=None):
     """
     Compute a configurable set of quality metrics to assess synthetic survival data.
 
@@ -374,12 +375,32 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
             lists of metric names to compute. Defaults to a standard set covering
             stats, detection, sanity, and privacy metrics.
         include_nndr (bool): Append a mean NNDR (synthetic -> real) column. Defaults to True.
+        include_tableone_min_p_value (bool): Append a "TableOne min p-value" column holding
+            the smallest per-variable p-value from a TableOne real-vs-synthetic comparison
+            (plus the survival log-rank p-value). A high value means no single variable
+            distinguishes synthetic from real. Requires `categorical` and `continuous`.
+            Defaults to False.
+        categorical (list, optional): Categorical column names for TableOne. Required when
+            include_tableone_min_p_value is True.
+        continuous (list, optional): Continuous column names for TableOne. Required when
+            include_tableone_min_p_value is True.
+        nonnormal (list, optional): Subset of continuous columns to summarize/test
+            non-parametrically in TableOne. Defaults to None (all treated as normal).
 
     Returns:
         DataFrame: Summary of metric scores for each synthetic dataset, with one
             column per matched metric and a 'generator' column.
     """
 
+    if include_tableone_min_p_value:
+        if (categorical is None) or (continuous is None):
+            raise ValueError(
+                "include_tableone_min_p_value=True requires both `categorical` and "
+                "`continuous` to be provided (lists of column names for TableOne)."
+            )
+        # data_init is the reference frame for every generated dataset; tag it once.
+        df_init_tableone = data_init.copy()
+        df_init_tableone["sample"] = 1
     synthcity_dataloader_init = SurvivalAnalysisDataLoader(data_init, target_column = "censor", time_to_event_column = "time")
 
     # Map synthcity output keys to human-readable column names
@@ -437,6 +458,21 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
         if include_nndr:
             values.append(nndr(data_init, generated_data)["mean"])
             name_columns.append("NNDR")
+        if include_tableone_min_p_value:
+            # Tag the synthetic frame and compare it against the real one with TableOne,
+            # grouping on `sample` (1 = real, 0 = synthetic). The smallest p-value across
+            # all variable tests (incl. the survival log-rank) is the hardest-to-pass test.
+            df_gen_tableone = generated_data.copy()
+            df_gen_tableone["sample"] = 0
+            _, min_p_value, _, _ = tableone_tests(
+                pd.concat([df_init_tableone, df_gen_tableone], ignore_index=True),
+                groupby="sample",
+                categorical=categorical,
+                continuous=continuous,
+                nonnormal=nonnormal,
+            )
+            values.append(min_p_value)
+            name_columns.append("TableOne min p-value")
         # print("values: ", values)
         scores.append(values)
 
