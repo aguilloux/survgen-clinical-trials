@@ -96,15 +96,15 @@ def run(MC_id):
     scale_C = 2.5
     scale_C_indep = 3.9
     feature_types_list = ["real", "cat"]
-    independent = True
-    # independent = False
+    # independent = True
+    independent = False
     data_types_create = True
 
     treatment_effect_hyperopt = 0.0 # 0.0
 
     metric_optuna = "detection_xgb"
-    dataset_name = "Simulations_aug_indep_traincontrol"
-    # dataset_name = "Simulations_aug_dep_traincontrol"
+    # dataset_name = "Simulations_aug_indep_traincontrol"
+    dataset_name = "Simulations_aug_dep_traincontrol"
     current_path = os.getcwd()  # Get current working directory
     parent_path = os.path.dirname(current_path)
     base_path = prepare_dataset_dirs(parent_path, dataset_name)
