@@ -163,22 +163,29 @@ def run(MC_id):
 
     list_epsilon = [1, 3, 5, 7, 10]
 
-    # Initialize storage for metrics and results
-    synthcity_metrics_res_dict = {
-        str(eps): {generator_name: pd.DataFrame() for generator_name in generators_sel} for eps in list_epsilon
+    synthcity_metrics_res_dict = {}
+    log_p_value_gen_dict = {}
+    log_p_value_control_dict = {}
+    est_cox_coef_gen_dict = {}
+    est_cox_coef_se_gen_dict = {}
+
+    for epsilon in list_epsilon:
+        synthcity_metrics_res_dict[str(epsilon)] = {
+            generator_name: pd.DataFrame() for generator_name in generators_sel
         }
-    log_p_value_gen_dict = {
-        str(eps): {generator_name: [] for generator_name in generators_sel} for eps in list_epsilon
+        log_p_value_gen_dict[str(epsilon)] = {
+            generator_name: [] for generator_name in generators_sel
         }
-    log_p_value_control_dict = {
-        str(eps): {generator_name: [] for generator_name in generators_sel} for eps in list_epsilon
+        log_p_value_control_dict[str(epsilon)] = {
+            generator_name: [] for generator_name in generators_sel
         }
-    est_cox_coef_gen_dict = {
-        str(eps): {generator_name: [] for generator_name in generators_sel} for eps in list_epsilon
+        est_cox_coef_gen_dict[str(epsilon)] = {
+            generator_name: [] for generator_name in generators_sel
         }
-    est_cox_coef_se_gen_dict = {
-        str(eps): {generator_name: [] for generator_name in generators_sel} for eps in list_epsilon
+        est_cox_coef_se_gen_dict[str(epsilon)] = {
+            generator_name: [] for generator_name in generators_sel
         }
+
     
     # Initialize result variables for MC experiment
     simu_num = []
