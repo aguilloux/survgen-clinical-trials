@@ -133,7 +133,7 @@ def run(MC_id):
     # miss_file = os.path.join(base_path, "Missing.csv")
     # true_miss_file = None
 
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise"], #"HI-VAE_lognormal", 
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise"] #, "HI-VAE_lognormal", 
                     #   "Surv-GAN", "Surv-VAE", 
                     #   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
                     #   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
