@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 module_path = Path.cwd().parent / 'utils'
 sys.path.append(str(module_path))
-import metrics
+import metrics, data_processing
 import numpy as np
 import optuna
 import os
@@ -52,7 +52,7 @@ def set_seed(seed=1):
     np.random.seed(seed)                         # NumPy
     torch.manual_seed(seed)                      # PyTorch (CPU)
 
-def run(data, columns, target_column, time_to_event_column, n_generated_dataset, n_generated_sample=None, params=None, cond_gen=None):
+def run(data, columns, target_column, time_to_event_column, n_generated_dataset, n_generated_sample=None, params=None, cond_gen=None, apply_rounding=False, feat_types_dict=None):
     """
     Use a conditional GAN for survival data generation
     """
@@ -87,6 +87,8 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
             est_data_gen_transformed_survgan = []
             for j in range(n_generated_dataset):
                 out = model_survgan.generate(count=n_generated_sample_, cond=cond_gen)
+                if apply_rounding:
+                    out = data_processing.round_data_gen(df.values, torch.from_numpy(out.numpy()), feat_types_dict)
                 est_data_gen_transformed_survgan.append(out)
 
             est_data_gen_transformed_survgan_list.append(est_data_gen_transformed_survgan)
@@ -104,6 +106,8 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         est_data_gen_transformed_survgan = []
         for j in range(n_generated_dataset):
             out = model_survgan.generate(count=n_generated_sample, cond=cond_gen)
+            if apply_rounding:
+                out = data_processing.round_data_gen(df.values, torch.from_numpy(out.numpy()), feat_types_dict)
             est_data_gen_transformed_survgan.append(out)
 
         return est_data_gen_transformed_survgan
@@ -140,7 +144,7 @@ def _evaluate_generation(gen_data, ref_loader, metrics_list):
 
 def optuna_hyperparameter_search(data, columns, target_column, time_to_event_column, n_generated_dataset, n_splits, n_trials, 
                                  n_generated_sample=None, cond_gen=None, study_name='optuna_study_surv_gan', 
-                                 metric='survival_km_distance', method='', cond_df=None, seed=10):
+                                 metric='survival_km_distance', method='', cond_df=None, seed=10, apply_rounding=False, feat_types_dict=None):
     
     df = pd.DataFrame(data.numpy(), columns=columns) # Preprocessed dataset
     dataloader = SurvivalAnalysisDataLoader(df, target_column=target_column, time_to_event_column=time_to_event_column)
@@ -173,6 +177,10 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
                     cond_gen = df.loc[indices][[target_column]]
                     cond = df[[target_column]]
                     gen_data = run_with_timeout_mp(model, params, dataloader, n_gen_sample*n_generated_dataset, cond, n_generated_dataset, cond_gen, timeout=120)
+                    if apply_rounding:
+                        out_rounded = data_processing.round_data_gen(df.values, torch.from_numpy(gen_data.numpy()), feat_types_dict)
+                        out_df = pd.DataFrame(out_rounded, columns=columns) # Preprocessed dataset
+                        gen_data = SurvivalAnalysisDataLoader(out_df, target_column=target_column, time_to_event_column=time_to_event_column)
                     scores = _evaluate_generation(gen_data, dataloader, metrics_list)
                 else:
                     cond = df[cond_generation.columns]

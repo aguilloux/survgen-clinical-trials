@@ -161,7 +161,9 @@ def run(dataset_name, generators_sel):
                                                                                             time_to_event_column="time", 
                                                                                             n_generated_dataset=n_generated_dataset, 
                                                                                             params=best_params,
-                                                                                            n_generated_sample=n_generated_samples_control)
+                                                                                            n_generated_sample=n_generated_samples_control,
+                                                                                            apply_rounding=True,
+                                                                                            feat_types_dict=feat_types_dict)
 
         # Convert generated data into dataframe
         df_gen_control_dict = {}
