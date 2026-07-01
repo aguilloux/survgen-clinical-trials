@@ -117,12 +117,13 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         if n_generated_sample is None:
             n_generated_sample = data.shape[0]
         est_data_gen_transformed_survae = generate_survae(model_survae, n_generated_dataset, n_generated_sample, target_column, time_to_event_column, condition)
-        est_data_gen_transformed_survae_rounded = []
         if apply_rounding:
+            est_data_gen_transformed_survae_rounded = []
             for j in range(n_generated_dataset):
                 est_data_gen_transformed_survae_rounded_j = data_processing.round_data_gen(df.values, torch.from_numpy(est_data_gen_transformed_survae[j].numpy()), feat_types_dict)
                 est_data_gen_transformed_survae_rounded.append(est_data_gen_transformed_survae_rounded_j)
-        return est_data_gen_transformed_survae_rounded
+            return est_data_gen_transformed_survae_rounded
+        return est_data_gen_transformed_survae
     
 def _evaluate_generation(gen_data, ref_loader, metrics_list):
     metrics_dict_evaluation, metrics_synthcity, expected_metrics = metrics.map_metrics_HPO(metrics_list)
