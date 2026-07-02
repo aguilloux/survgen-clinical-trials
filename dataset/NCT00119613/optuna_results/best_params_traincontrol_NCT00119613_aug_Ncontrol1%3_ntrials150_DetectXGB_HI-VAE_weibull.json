@@ -1,0 +1,1 @@
+{"lr": 0.005, "batch_size": 15, "z_dim": 160, "y_dim": 40, "s_dim": 14}
