@@ -156,7 +156,7 @@ def run(MC_id):
     # MONTE-CARLO EXPERIMENT
     n_MC_exp = 10
     treat_effects = np.arange(0., 1.1, 0.2)
-    list_n_samples_control = [(1/3), (2/3), 1.0]
+    list_n_samples_control = [1.0, (2/3), (1/3)]
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
                                 'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score']

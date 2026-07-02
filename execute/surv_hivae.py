@@ -35,7 +35,7 @@ def set_seed(seed=1):
 # TRAINING HIVAE FUNCTION
 # ───────────────────────
 def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, batch_size, lr, epochs, verbose = True, seed=1, 
-                start_epoch=0, norm_mode="global", differential_privacy=False, target_epsilon=None, target_delta=1e-5, max_grad_norm=1.0,
+                start_epoch=0, norm_mode="global", differential_privacy=False, target_epsilon=None, target_delta=1e-5, max_grad_norm=10.0,
                 train_val_share=0.9):
     """ 
         HIVAE training function.
@@ -153,6 +153,7 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
             optimizer.zero_grad()
             vae_res = vae_model.forward(data_list_observed, batch_data_list, batch_miss_list, tau, n_generated_dataset=1)
             vae_res["neg_ELBO_loss"].backward()
+            torch.nn.utils.clip_grad_norm_(vae_model.parameters(), max_norm=max_grad_norm)
             optimizer.step()
 
             avg_loss += vae_res["neg_ELBO_loss"].item()
