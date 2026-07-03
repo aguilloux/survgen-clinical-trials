@@ -244,7 +244,7 @@ def run(MC_id):
             for generator_name in generators_sel:
                 best_params = best_params_dict[generator_name]
                 if "HI-VAE" in generator_name:
-                    best_params["epochs"] = 10000
+                    best_params["epochs"] = 5000
                     gen_from_prior = "_prior" in generator_name
                     differential_privacy = "_DP" in generator_name
                     diffusion = "_diffusion" in generator_name
