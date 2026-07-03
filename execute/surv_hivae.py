@@ -798,7 +798,8 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                  target_epsilon=None, target_delta=1e-5, tune_epsilon=False,
                                  tune_params=None, fixed_params=None, norm_mode="global",
                                  screening_epochs=800, n_startup_trials=20, 
-                                 differential_privacy=False, diffusion=False, do_prune=False, apply_rounding=False):
+                                 differential_privacy=False, diffusion=False, do_prune=False, apply_rounding=False,
+                                 diffusion_pre_params=None):
     
     # differential_privacy = "_DP" in generator_name
     if tune_epsilon and not differential_privacy:
@@ -826,11 +827,21 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
 
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
+        if diffusion_pre_params is not None:
+            tune_params = ["diffusion_hidden_dim", "diffusion_batch_size", "diffusion_lr"]
         hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
-        epochs = params["epochs"]
         max_grad_norm = params.get("max_grad_norm", None)
+        epochs = params["epochs"]
+        if diffusion_pre_params is not None:
+            params["z_dim"] = diffusion_pre_params["z_dim"]
+            params["y_dim"] = diffusion_pre_params["y_dim"]
+            params["s_dim"] = diffusion_pre_params["s_dim"]
+            params["batch_size"] = diffusion_pre_params["batch_size"]
+            params["lr"] = diffusion_pre_params["lr"]
+            max_grad_norm = 10.
+
         # When tune_epsilon is on, the sampled "target_epsilon" overrides the
         # function-level target_epsilon for this trial; otherwise fall back to it.
         trial_target_epsilon = params.get("target_epsilon", target_epsilon)

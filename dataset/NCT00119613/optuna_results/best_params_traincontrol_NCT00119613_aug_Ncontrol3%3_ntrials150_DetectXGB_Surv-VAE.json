@@ -1,0 +1,1 @@
+{"n_iter": 500, "lr": 0.001, "decoder_n_layers_hidden": 3, "weight_decay": 0.0001, "batch_size": 64, "n_units_embedding": 50, "decoder_n_units_hidden": 450, "decoder_nonlin": "tanh", "decoder_dropout": 0.19238888221599204, "encoder_n_layers_hidden": 1, "encoder_n_units_hidden": 500, "encoder_nonlin": "relu", "encoder_dropout": 0.13013053601075947}

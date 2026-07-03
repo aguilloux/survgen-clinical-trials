@@ -1,0 +1,1 @@
+{"lr": 0.002, "batch_size": 37, "z_dim": 170, "y_dim": 80, "s_dim": 14, "n_layers_surv_piecewise": 1, "n_intervals": 20}

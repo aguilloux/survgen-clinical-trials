@@ -1,0 +1,1 @@
+{"lr": 0.0002, "batch_size": 37, "z_dim": 10, "y_dim": 180, "s_dim": 4, "diffusion_lr": 0.0001, "diffusion_hidden_dim": 20, "diffusion_batch_size": 9440}
