@@ -4,6 +4,7 @@ import torch
 from sksurv.nonparametric import kaplan_meier_estimator
 
 import sys
+import shutil
 from pathlib import Path
 module_path = Path.cwd().parent / 'utils'
 sys.path.append(str(module_path))
@@ -75,14 +76,26 @@ def adjust_feat_types_for_generator(generator_name, feat_types_dict):
                 d["type"] = 'surv_piecewise'
     return feat_types_dict_ext
 
-def setup_unique_working_dir(base_dir="experiments"):
-    original_dir = os.getcwd()  # Save original dir
+# def setup_unique_working_dir(base_dir="experiments"):
+#     original_dir = os.getcwd()  # Save original dir
+#     os.makedirs(base_dir, exist_ok=True)
+#     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#     uid = uuid.uuid4().hex[:8]
+#     work_dir = os.path.join(base_dir, f"run_{timestamp}_{uid}")
+#     os.makedirs(work_dir, exist_ok=True)
+#     return original_dir, work_dir  # Return the original dir
+
+def setup_unique_working_dir(base_dir=None):
+    original_dir = os.getcwd()
+    if base_dir is None:
+        scratch = os.environ.get("SCRATCH") or "/tmp"
+        base_dir = os.path.join(scratch, f"survgen_runs_{os.getpid()}")
     os.makedirs(base_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     uid = uuid.uuid4().hex[:8]
     work_dir = os.path.join(base_dir, f"run_{timestamp}_{uid}")
     os.makedirs(work_dir, exist_ok=True)
-    return original_dir, work_dir  # Return the original dir
+    return original_dir, work_dir
 
 def run(MC_id):
 
@@ -125,7 +138,8 @@ def run(MC_id):
     })
 
     # Set a unique working directory for this job
-    original_dir, work_dir = setup_unique_working_dir("parallel_runs")
+    # original_dir, work_dir = setup_unique_working_dir("parallel_runs")
+    original_dir, work_dir = setup_unique_working_dir()
     print("Working directory:", work_dir)
     print("Original directory:", original_dir)
 
@@ -401,6 +415,10 @@ def run(MC_id):
     MC_init = MC_id * n_MC_exp + 1
     MC_final = (MC_id + 1) * n_MC_exp
     results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_DP_{metric_optuna}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
+
+    # tout à la fin de run(), après le to_csv
+    os.chdir(original_dir)
+    shutil.rmtree(os.path.join(os.environ.get("SCRATCH", "/tmp"), f"survgen_runs_{os.getpid()}"), ignore_errors=True)
 
 if __name__ == "__main__":
     MC_id = int(sys.argv[1])
