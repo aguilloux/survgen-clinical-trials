@@ -121,7 +121,8 @@ def run(dataset_name, generators_sel):
                         best_param_file = f
                 with open(best_param_dir + "/" + best_param_file, "r") as f:
                     best_params_diffusion = json.load(f)
-                best_params_file_wo_diffusion = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, optuna_version_name, generator_name.replace("_diffusion", ""))
+                name_config_ = "traincontrol_" + dataset_name + "_aug_Ncontrol{}%3".format((d+1))
+                best_params_file_wo_diffusion = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config_, n_trials, optuna_version_name, generator_name.replace("_diffusion", ""))
                 with open(best_params_file_wo_diffusion, "r") as f:
                     best_params_wo_diffusion = json.load(f)
                 best_params_dict[generator_name] = best_params_wo_diffusion | best_params_diffusion
@@ -249,6 +250,7 @@ if __name__ == "__main__":
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
                       "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
-    dataset_id = int(sys.argv[1])
+    # dataset_id = int(sys.argv[1])
+    dataset_id = 0
     dataset_name = dataset_sel[dataset_id]
     run(dataset_name , generators_sel)
