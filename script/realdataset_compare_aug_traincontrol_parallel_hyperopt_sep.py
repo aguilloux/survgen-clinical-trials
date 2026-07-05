@@ -115,21 +115,22 @@ def run(dataset_name, generators_sel):
         best_params_dict = {}
         for generator_name in generators_sel:
             # best_param_file = [item for item in best_param_files if generator_name in item][0]
-            for f in os.listdir(best_param_dir):
-                if "diffusion" in generator_name:
+            if "diffusion" in generator_name:
+                for f in os.listdir(best_param_dir):
                     if (f.endswith(generator_name + '_hyperopt_sep.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "Kmap_SurvDist") in f)):
                         best_param_file = f
-                    with open(best_param_dir + "/" + best_param_file, "r") as f:
-                        best_params_diffusion = json.load(f)
-                    best_params_file_wo_diffusion = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, optuna_version_name, generator_name.replace("_diffusion", ""))
-                    with open(best_params_file_wo_diffusion, "r") as f:
-                        best_params_wo_diffusion = json.load(f)
-                    best_params_dict[generator_name] = best_params_wo_diffusion | best_params_diffusion
-                else:
+                with open(best_param_dir + "/" + best_param_file, "r") as f:
+                    best_params_diffusion = json.load(f)
+                best_params_file_wo_diffusion = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, optuna_version_name, generator_name.replace("_diffusion", ""))
+                with open(best_params_file_wo_diffusion, "r") as f:
+                    best_params_wo_diffusion = json.load(f)
+                best_params_dict[generator_name] = best_params_wo_diffusion | best_params_diffusion
+            else:
+                for f in os.listdir(best_param_dir):
                     if (f.endswith(generator_name + '.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, optuna_version_name) in f)):
                         best_param_file = f
-                    with open(best_param_dir + "/" + best_param_file, "r") as f:
-                        best_params_dict[generator_name] = json.load(f)
+                with open(best_param_dir + "/" + best_param_file, "r") as f:
+                    best_params_dict[generator_name] = json.load(f)
 
         os.chdir(work_dir)
         data_gen_control_dict = {}
