@@ -281,7 +281,8 @@ def run(MC_id):
                     if "HI-VAE" in generator_name:
                         best_params["epochs"] = 5000
                         gen_from_prior = "_prior" in generator_name
-                        differential_privacy = "_DP" in generator_name
+                        # differential_privacy = "_DP" in generator_name
+                        differential_privacy = True
                         diffusion = "_diffusion" in generator_name
                         feat_types_dict_ext = adjust_feat_types_for_generator(generator_name, feat_types_dict)
                         data_gen_control = generators_dict[generator_name].run(df_init_control_encoded, miss_mask_control, 
