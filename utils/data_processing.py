@@ -636,9 +636,11 @@ def survival_variables_transformation(data, types_dict):
     for d in types_dict:
         if d['type'] in ['surv','surv_weibull','surv_loglog', 'surv_piecewise']:
             subset = output[:, feat_idx : feat_idx + 2]
-            time_cens = (torch.min(subset, dim=1, keepdim=True))
-            output[:, feat_idx] = time_cens.values.squeeze(1)
-            output[:, feat_idx + 1] = 1 - time_cens.indices.squeeze(1)
+            T = subset[:, 0]
+            C = subset[:, 1]
+            event = (T < C).float()
+            output[:, feat_idx] = torch.minimum(T, C)
+            output[:, feat_idx + 1] = event
             feat_idx += 2
         else:
             feat_idx += 1

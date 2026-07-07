@@ -8,25 +8,22 @@ Created on Mon Feb 17 20:35:11 2025
 @author: Van Tuan NGUYEN
 """
 
-import tempfile
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from numpy.linalg import LinAlgError
 
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score, roc_curve
 
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from lifelines import CoxPHFitter
 from tableone import TableOne
 
-from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader, GenericDataLoader
+from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader
 from synthcity.utils.reproducibility import clear_cache, enable_reproducible_results
 from synthcity.metrics.eval import Metrics
-from synthcity.metrics.eval_privacy import DomiasMIAKDE, DomiasMIAPrior, DomiasMIABNAF
 
 
 def compute_logrank_test(control, treat):
@@ -190,15 +187,19 @@ def strata_cox_estimation(data_init, data_syn, strata=None):
 
     return coef_init, np.array(coef_syn), p_value_init, np.array(p_value_syn)
 
-def compute_nndr(data_real, data_syn, columns=None, eps=1e-8):
+def compute_nndr(data_real, data_syn, columns=None, categorical=None, eps=1e-8):
     """
     Per-record Nearest Neighbor Distance Ratio (NNDR) in the synthetic -> real direction.
 
     For each synthetic record, find its nearest (d1) and second-nearest (d2) records
-    in the real dataset and return d1 / d2. Features are standardized using statistics
-    fitted on the real data, so a wide-scale column (e.g. 'time') cannot dominate the
-    Euclidean distance. Because the query set (synthetic) differs from the search set
-    (real), d1 is a genuine real neighbor, not a trivial self-match.
+    in the real dataset and return d1 / d2. Continuous features are standardized using
+    statistics fitted on the real data, so a wide-scale column (e.g. 'time') cannot
+    dominate the Euclidean distance. Categorical features (listed in ``categorical``) are
+    one-hot encoded instead, so an integer code 0..k never imposes a spurious
+    0 < 1 < ... < k ordering and every category mismatch carries the same fixed weight
+    regardless of cardinality or level frequency. Because the query set (synthetic)
+    differs from the search set (real), d1 is a genuine real neighbor, not a trivial
+    self-match.
 
     The ratio lies in [0, 1]: values near 0 flag synthetic records that single out one
     real record (potential privacy leakage), values near 1 indicate records sitting in a
@@ -208,7 +209,11 @@ def compute_nndr(data_real, data_syn, columns=None, eps=1e-8):
         data_real (DataFrame): Real (reference) dataset; the neighbor search space.
         data_syn (DataFrame): Synthetic dataset; the query records.
         columns (list, optional): Columns to use for the distance. Defaults to the
-            numeric columns shared by both frames.
+            numeric columns shared by both frames, plus any columns named in
+            ``categorical``.
+        categorical (list, optional): Subset of ``columns`` to treat as categorical --
+            one-hot encoded (real and synthetic encoded together so they share dummy
+            columns) rather than standardized. Defaults to None (every column continuous).
         eps (float): Floor on d2 to avoid division by zero when a synthetic record
             coincides with >=2 real records (d1 = d2 = 0 -> NNDR = 0, i.e. flagged risky).
 
@@ -221,22 +226,45 @@ def compute_nndr(data_real, data_syn, columns=None, eps=1e-8):
     if columns is None:
         columns = [c for c in real.columns
                    if c in syn.columns and np.issubdtype(real[c].dtype, np.number)]
+        # Keep explicitly-declared categoricals even if their (encoded) dtype is non-numeric.
+        for c in (categorical or []):
+            if c in real.columns and c in syn.columns and c not in columns:
+                columns.append(c)
     if not columns:
         raise ValueError("No shared numeric columns to compute NNDR on.")
 
-    # Fit the standardization on the real data: it is the reference frame the synthetic
-    # records are scored against. StandardScaler maps zero-variance columns to scale 1,
-    # so constant columns stay finite instead of producing NaNs.
-    scaler = StandardScaler().fit(real[columns].to_numpy())
-    real_scaled = scaler.transform(real[columns].to_numpy())
-    syn_scaled = scaler.transform(syn[columns].to_numpy())
+    categorical = [c for c in (categorical or []) if c in columns]
+    continuous = [c for c in columns if c not in categorical]
+
+    # Continuous block: standardized on the real data (the reference frame the synthetic
+    # records are scored against). StandardScaler maps zero-variance columns to scale 1,
+    # so constant columns stay finite instead of producing NaNs. Categorical block: one-hot
+    # on real+synthetic together (identical dummy columns), left as 0/1 so every category
+    # mismatch adds the same fixed distance -- no false ordinality, no cardinality blow-up.
+    real_blocks, syn_blocks = [], []
+
+    if continuous:
+        scaler = StandardScaler().fit(real[continuous].to_numpy())
+        real_blocks.append(scaler.transform(real[continuous].to_numpy()))
+        syn_blocks.append(scaler.transform(syn[continuous].to_numpy()))
+
+    if categorical:
+        dummies = pd.get_dummies(
+            pd.concat([real[categorical], syn[categorical]], ignore_index=True),
+            columns=categorical,
+        )
+        real_blocks.append(dummies.iloc[:len(real)].to_numpy(dtype=float))
+        syn_blocks.append(dummies.iloc[len(real):].to_numpy(dtype=float))
+
+    real_scaled = np.hstack(real_blocks)
+    syn_scaled = np.hstack(syn_blocks)
 
     nn = NearestNeighbors(n_neighbors=2).fit(real_scaled)
     dist, _ = nn.kneighbors(syn_scaled)  # query synthetic against real
     d1, d2 = dist[:, 0], dist[:, 1]
     return d1 / np.maximum(d2, eps)
 
-def nndr(data_real, data_syn, columns=None, percentile=5, eps=1e-8):
+def nndr(data_real, data_syn, columns=None, categorical=None, percentile=5, eps=1e-8):
     """
     Reduced NNDR statistics for the synthetic -> real direction.
 
@@ -244,6 +272,8 @@ def nndr(data_real, data_syn, columns=None, percentile=5, eps=1e-8):
         data_real (DataFrame): Real (reference) dataset.
         data_syn (DataFrame): Synthetic dataset.
         columns (list, optional): Columns to use. Defaults to shared numeric columns.
+        categorical (list, optional): Columns to one-hot encode instead of standardize,
+            forwarded to compute_nndr. Defaults to None.
         percentile (float): Low percentile summarizing the risky tail. Defaults to 5.
         eps (float): Division-by-zero floor passed to compute_nndr.
 
@@ -252,7 +282,7 @@ def nndr(data_real, data_syn, columns=None, percentile=5, eps=1e-8):
             "everything is a mean" style of the general_metrics tables; the low percentile
             captures the risky tail (synthetic records with NNDR near 0).
     """
-    scores = compute_nndr(data_real, data_syn, columns=columns, eps=eps)
+    scores = compute_nndr(data_real, data_syn, columns=columns, categorical=categorical, eps=eps)
     return {
         "mean": float(np.mean(scores)),
         f"p{percentile}": float(np.percentile(scores, percentile)),
@@ -375,13 +405,18 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
             lists of metric names to compute. Defaults to a standard set covering
             stats, detection, sanity, and privacy metrics.
         include_nndr (bool): Append a mean NNDR (synthetic -> real) column. Defaults to True.
+            When `categorical` is given, those columns are one-hot encoded in the NNDR
+            distance (otherwise every column is treated as continuous).
         include_tableone_min_p_value (bool): Append a "TableOne min p-value" column holding
             the smallest per-variable p-value from a TableOne real-vs-synthetic comparison
             (plus the survival log-rank p-value). A high value means no single variable
             distinguishes synthetic from real. Requires `categorical` and `continuous`.
             Defaults to False.
-        categorical (list, optional): Categorical column names for TableOne. Required when
-            include_tableone_min_p_value is True.
+        categorical (list, optional): Categorical column names. Required when
+            include_tableone_min_p_value is True (used by TableOne). Also used by NNDR when
+            include_nndr is True -- forwarded to compute_nndr so these columns are one-hot
+            encoded rather than treated as continuous. Optional for NNDR: omitting it just
+            falls back to all-continuous distances.
         continuous (list, optional): Continuous column names for TableOne. Required when
             include_tableone_min_p_value is True.
         nonnormal (list, optional): Subset of continuous columns to summarize/test
@@ -456,7 +491,7 @@ def general_metrics_modular(data_init, data_gen, generator, metrics = {
                 values.append(val)
                 name_columns.append(expected_metrics[metric])
         if include_nndr:
-            values.append(nndr(data_init, generated_data)["mean"])
+            values.append(nndr(data_init, generated_data, categorical=categorical)["mean"])
             name_columns.append("NNDR")
         if include_tableone_min_p_value:
             # Tag the synthetic frame and compare it against the real one with TableOne,
@@ -547,218 +582,162 @@ def variable_pct_passed_tests(data_init, data_gen, categorical, continuous, nonn
         variables_pct_failed_tests[variable] = np.array(variables_pct_failed_tests[variable]).mean()
     return variables_pct_failed_tests
 
-_DOMIAS_VARIANTS = {
-    "KDE": DomiasMIAKDE,
-    "prior": DomiasMIAPrior,
-    "BNAF": DomiasMIABNAF,
-}
-
-
-def _run_domias_attack(variant, members, nonmembers, syn, ref_syn, reference_size, random_state, workspace):
-    """
-    Instantiate the requested DOMIAS evaluator and run it on a single, already
-    column-aligned split.
-
-    Calls the protected ``_evaluate`` directly instead of the public ``evaluate``: the latter
-    caches results keyed only on the hashes of ``X_gt`` and ``X_syn`` (see
-    ``PrivacyEvaluator.evaluate``), ignoring ``X_train`` and ``reference_size``, so across folds
-    it would silently return stale scores.
-
-    Returns:
-        dict: synthcity's raw DOMIAS output, with keys ``"accuracy"`` and ``"aucroc"``.
-    """
-    evaluator = _DOMIAS_VARIANTS[variant](
-        reduction="mean",
-        use_cache=False,
-        random_state=random_state,
-        workspace=workspace,
-    )
-    return evaluator._evaluate(
-        GenericDataLoader(nonmembers),   # X_gt          -> non-members (first k) + reference set (last k)
-        GenericDataLoader(syn),          # synth_set     -> synthetic sample
-        GenericDataLoader(members),      # X_train       -> members
-        GenericDataLoader(ref_syn),      # synth_val_set -> only used by BNAF
-        reference_size=reference_size,
-    )
-
-
 def membership_inference_attack(
     data_members,
     data_nonmembers,
     data_syn,
-    data_ref_syn=None,
-    variant="KDE",
-    reference_size=30,
-    drop_constant=True,
-    fallback_to_bnaf=True,
-    random_state=0,
-    workspace=None,
+    columns=None,
+    categorical=None,
+    bootstrap=False,
+    n_bootstrap=1000,
+    random_state=1,
+    tpr_at_fpr=(0.1, 0.2),
 ):
     """
-    Run a DOMIAS membership inference attack (MIA) against a synthetic dataset.
+    GAN-Leaks full black-box membership inference attack (MIA) against synthetic data.
 
-    DOMIAS (van Breugel et al., AISTATS 2023) detects generator overfitting by comparing,
-    for each real record, a density ratio p_synthetic(x) / p_reference(x). Records the
-    generator memorised (members) tend to score higher than fresh held-out records
-    (non-members); the attack's ability to separate the two is reported as an AUCROC.
-    AUCROC ~ 0.5 means the attacker cannot tell members from non-members (good privacy);
-    AUCROC -> 1.0 indicates membership leakage.
+    Scores each real record by its distance to the nearest synthetic record (closer => more
+    likely a training member) and reports how well that score separates known members
+    (``data_members``, the generator's training rows) from non-members (``data_nonmembers``, a
+    same-distribution holdout the generator never saw), as an ROC AUC. AUC ~ 0.5 means members
+    and non-members are indistinguishable (no membership leakage); AUC -> 1.0 means the generator
+    places synthetic mass specifically near the records it was trained on (memorisation).
 
-    The attack needs three pieces of data that a plain real-vs-synthetic comparison
-    (e.g. general_metrics_modular) does not provide, which is why this lives in its own
-    function:
-        - members      : real rows the generator was trained on,
-        - non-members  : real rows held out from training (also sliced to build the
-                         reference set used for density estimation),
-        - synthetic    : data produced by the generator trained on ``members``.
+    Because the score is a members-vs-holdout *contrast*, the generator's overall fidelity
+    cancels (it shifts both groups' distances together): only the train/holdout asymmetry --
+    memorisation -- moves the AUC. That is what distinguishes a real MIA from NNDR /
+    identifiability, which read a raw distance and so blend fidelity into the value.
 
-    Density estimator variants (``variant``):
-        - "KDE"   : gaussian_kde on the synthetic sample and on the reference slice. Fast,
-                    but gaussian_kde raises on singular covariance, which happens when a
-                    column is (near-)constant (e.g. an all-censored slice, or a collapsed
-                    binary column in the synthetic data).
-        - "prior" : gaussian_kde on the synthetic sample, analytic Gaussian as reference.
-                    Fast; shares the synthetic-side fragility of KDE.
-        - "BNAF"  : a normalizing-flow neural density estimator. Robust to degenerate /
-                    low-dimensional data, but ~100-1000x slower (it trains two small networks
-                    per call). Use this to run everything on BNAF regardless of column shape.
-
-    Robustness handling for the fast variants:
-        - ``drop_constant=True`` removes any non-continuous column that is constant in the data
-          gaussian_kde fits on (the synthetic sample and the reference slice). A constant column
-          carries no membership signal, so dropping it is information-free. Columns that are
-          (quasi-)continuous over the real data are never dropped (the reference density needs
-          at least one), so a degenerate continuous column falls through to the BNAF fallback.
-        - ``fallback_to_bnaf=True`` retries with BNAF if KDE/prior still fail numerically.
+    Continuous columns are standardised on the members; categorical columns (``categorical``)
+    are one-hot encoded across members + non-members + synthetic together, matching
+    compute_nndr's mixed-type handling (a k-level code imposes no false 0<1<...<k ordering).
 
     Args:
-        data_members (DataFrame): Real rows used to train the generator (the "members").
-        data_nonmembers (DataFrame): Held-out real rows (the "non-members"). Should contain at
-            least ``2 * reference_size`` rows: the first ``reference_size`` become test
-            non-members and the last ``reference_size`` become the density reference set, so the
-            two slices stay disjoint. ``reference_size`` is capped automatically (with a warning)
-            if there are too few rows.
-        data_syn (DataFrame): Synthetic data from the generator trained on ``data_members``.
-        data_ref_syn (DataFrame, optional): Reference/validation synthetic set used by BNAF to
-            fit the synthetic density. Ignored by KDE/prior. Defaults to ``data_syn``.
-        variant (str): "KDE" (default), "prior", or "BNAF".
-        reference_size (int): Size of each held-out slice (non-members and reference set).
-            Defaults to 30. Larger values give a more reliable AUCROC and make accidental
-            constant slices less likely, at the cost of a larger held-out set.
-        drop_constant (bool): Drop constant columns before density estimation. Defaults to True.
-        fallback_to_bnaf (bool): Retry with BNAF if KDE/prior fail numerically. Defaults to True.
-        random_state (int): Seed for the evaluator. Defaults to 0.
-        workspace (str or Path, optional): Scratch directory for synthcity. Defaults to a
-            temporary directory.
+        data_members (DataFrame): Real rows the generator was trained on (members).
+        data_nonmembers (DataFrame): Same-distribution held-out rows (non-members) -- a fresh
+            simulation draw for simulated data, or a train/holdout split for real data.
+        data_syn (DataFrame or list of DataFrame): Synthetic data. A list (e.g. the Monte-Carlo
+            replicates) is pooled into one reference set: membership is a property of the trained
+            model, so the attack uses all the generation at once rather than scoring each replicate.
+        columns (list, optional): Columns to use. Defaults to the numeric columns shared by all
+            inputs, plus any named in ``categorical``.
+        categorical (list, optional): Columns to treat as categorical (one-hot encoded).
+        bootstrap (bool): Add a bootstrap confidence interval for the AUC. Defaults to False.
+        n_bootstrap (int): Bootstrap resamples when ``bootstrap=True``. Defaults to 1000.
+        random_state (int): Seed for the bootstrap. Defaults to 0.
+        tpr_at_fpr (float, iterable of float, or None): FPR operating point(s) at which to also
+            report the true-positive rate (TPR@FPR), a worst-case / tail-leakage metric that AUC
+            averages away. Defaults to (0.1, 0.2). Set to None to skip. Each target's resolution
+            is capped by the non-member count: the finest usable FPR is ~1 / n_nonmembers, and a
+            target of ``f`` rests on about ``f * n_nonmembers`` holdout records -- keep at least
+            ~15-20 there (e.g. FPR >= 0.1 at ~180 non-members), or the estimate is single-record
+            noise. Always read the TPR@FPR values with their bootstrap CIs.
 
     Returns:
-        dict: {
-            "aucroc": float,                    # primary MIA score (0.5 = no leakage)
-            "accuracy": float,
-            "variant_used": str,                # differs from ``variant`` if the BNAF fallback fired
-            "reference_size": int,              # possibly capped
-            "n_features_used": int,             # after the constant-column guard
-            "dropped_constant_columns": list,   # column names removed by the guard
-        }
+        dict: {"mia_auc": float, "n_members": int, "n_nonmembers": int}, plus one
+            "tpr@fpr=<f>" entry per requested ``tpr_at_fpr`` target, and, when ``bootstrap=True``,
+            also {"ci_low": float, "ci_high": float} for the AUC and
+            "tpr@fpr=<f>_ci_low"/"tpr@fpr=<f>_ci_high" for each target.
 
     Note:
-        Columns must be numeric and shared across all inputs; only the common columns (in
-        ``data_members`` order) are used. All available members are tested against
-        ``reference_size`` non-members, so the test set is intentionally imbalanced -- average
-        the AUCROC over several synthetic draws / cross-validation folds for a stable estimate.
+        The AUC's precision is set by the number of member / non-member records, not by how much
+        synthetic you pool -- at ~100 non-members the 95% CI is roughly +/-0.07, so treat only
+        AUC >~ 0.6 as evidence of leakage. As a positive control, run it on reconstruction-based
+        (posterior) generation, where it should read clearly above 0.5.
     """
-    if variant not in _DOMIAS_VARIANTS:
-        raise ValueError(
-            f"Unknown variant {variant!r}. Choose from {sorted(_DOMIAS_VARIANTS)}."
-        )
-
     members = pd.DataFrame(data_members).reset_index(drop=True)
     nonmembers = pd.DataFrame(data_nonmembers).reset_index(drop=True)
-    syn = pd.DataFrame(data_syn).reset_index(drop=True)
-    using_ref_syn = data_ref_syn is not None
-    ref_syn = pd.DataFrame(data_ref_syn).reset_index(drop=True) if using_ref_syn else syn
+    if isinstance(data_syn, (list, tuple)):
+        syn = pd.concat([pd.DataFrame(s) for s in data_syn], ignore_index=True)
+    else:
+        syn = pd.DataFrame(data_syn).reset_index(drop=True)
 
-    # DOMIAS concatenates these frames, so they must expose identical columns in identical
-    # order. Keep only the columns shared by every frame, in ``members`` order.
-    frames = [members, nonmembers, syn, ref_syn]
-    common = [c for c in members.columns if all(c in f.columns for f in frames)]
-    if not common:
-        raise ValueError(
-            "No shared feature columns across members / non-members / synthetic data."
+    # Columns: numeric columns shared by all three frames, plus any declared categoricals.
+    frames = [members, nonmembers, syn]
+    if columns is None:
+        columns = [c for c in members.columns
+                   if all(c in f.columns for f in frames) and np.issubdtype(members[c].dtype, np.number)]
+        for c in (categorical or []):
+            if c in members.columns and all(c in f.columns for f in frames) and c not in columns:
+                columns.append(c)
+    if not columns:
+        raise ValueError("No shared columns to run the attack on.")
+    categorical = [c for c in (categorical or []) if c in columns]
+    continuous = [c for c in columns if c not in categorical]
+
+    # Encode the three frames identically: continuous standardised on the members (so a
+    # degenerate synthetic can't distort the scale), categoricals one-hot across all three
+    # together (aligned dummy columns, left 0/1 -> no false ordinality).
+    mem_blocks, non_blocks, syn_blocks = [], [], []
+    if continuous:
+        scaler = StandardScaler().fit(members[continuous].to_numpy())
+        mem_blocks.append(scaler.transform(members[continuous].to_numpy()))
+        non_blocks.append(scaler.transform(nonmembers[continuous].to_numpy()))
+        syn_blocks.append(scaler.transform(syn[continuous].to_numpy()))
+    if categorical:
+        n_mem, n_non = len(members), len(nonmembers)
+        dummies = pd.get_dummies(
+            pd.concat([members[categorical], nonmembers[categorical], syn[categorical]], ignore_index=True),
+            columns=categorical,
         )
-    members, nonmembers, syn, ref_syn = members[common], nonmembers[common], syn[common], ref_syn[common]
+        mem_blocks.append(dummies.iloc[:n_mem].to_numpy(dtype=float))
+        non_blocks.append(dummies.iloc[n_mem:n_mem + n_non].to_numpy(dtype=float))
+        syn_blocks.append(dummies.iloc[n_mem + n_non:].to_numpy(dtype=float))
+    mem_mat = np.hstack(mem_blocks)
+    non_mat = np.hstack(non_blocks)
+    syn_mat = np.hstack(syn_blocks)
 
-    # DOMIAS' reference density (normal_func_feat) needs at least one (quasi-)continuous feature
-    # (>=10 unique values pooled over the real data); otherwise synthcity raises internally.
-    pooled_unique = pd.concat([members, nonmembers], ignore_index=True).nunique()
-    continuous_cols = {c for c in common if pooled_unique[c] >= 10}
-    if not continuous_cols:
-        raise ValueError(
-            "DOMIAS requires at least one (quasi-)continuous feature (>=10 unique values); "
-            "none of the shared columns qualify."
-        )
+    # GAN-Leaks score: proximity to the nearest synthetic record (query real -> synthetic).
+    nn = NearestNeighbors(n_neighbors=1).fit(syn_mat)
+    d_mem = nn.kneighbors(mem_mat)[0][:, 0]
+    d_non = nn.kneighbors(non_mat)[0][:, 0]
 
-    # Holdout budget: non-members and the reference set are disjoint slices of the held-out
-    # rows, so we need 2 * reference_size of them.
-    max_reference = len(nonmembers) // 2
-    if max_reference < 1:
-        raise ValueError(
-            f"Need at least 2 non-member rows to form the test/reference slices; got {len(nonmembers)}."
-        )
-    if reference_size > max_reference:
-        warnings.warn(
-            f"reference_size={reference_size} is too large for {len(nonmembers)} non-member rows; "
-            f"capping to {max_reference} so the non-member and reference slices stay disjoint."
-        )
-        reference_size = max_reference
+    def _scores_labels(dm, dn):
+        # closer to synthetic -> more member-like, so negate distance
+        return np.concatenate([-dm, -dn]), np.concatenate([np.ones(len(dm)), np.zeros(len(dn))])
 
-    # Constant-column guard: gaussian_kde (KDE/prior) inverts the covariance of its inputs and
-    # blows up on a constant column. Drop any non-continuous column that is constant in a frame
-    # gaussian_kde fits on -- the synthetic sample and the reference slice (the last
-    # reference_size held-out rows). Continuous columns are protected so the reference density
-    # keeps a feature; a degenerate continuous column instead trips the BNAF fallback below.
-    dropped = []
-    if drop_constant:
-        guard_frames = [syn, nonmembers.iloc[-reference_size:]]
-        constant = sorted(
-            c for c in common
-            if c not in continuous_cols
-            and any(f[c].nunique(dropna=False) <= 1 for f in guard_frames)
-        )
-        keep = [c for c in common if c not in constant]
-        if constant and keep:
-            dropped = constant
-            common = keep
-            members, nonmembers, syn, ref_syn = members[keep], nonmembers[keep], syn[keep], ref_syn[keep]
+    def _auc(dm, dn):
+        scores, labels = _scores_labels(dm, dn)
+        return float(roc_auc_score(labels, scores))
 
-    workspace = Path(workspace) if workspace is not None else Path(tempfile.gettempdir()) / "synthcity_mia_workspace"
+    def _tpr_at_fpr(dm, dn, target_fpr):
+        # TPR at a fixed FPR: interpolate the ROC curve. Tail/worst-case leakage metric --
+        # unlike AUC it does not average over easy records, so it catches a few memorised rows.
+        scores, labels = _scores_labels(dm, dn)
+        fpr, tpr, _ = roc_curve(labels, scores)
+        return float(np.interp(target_fpr, fpr, tpr))
 
-    variant_used = variant
-    try:
-        result = _run_domias_attack(
-            variant, members, nonmembers, syn, ref_syn, reference_size, random_state, workspace
-        )
-    except (LinAlgError, ValueError) as err:
-        if variant in ("KDE", "prior") and fallback_to_bnaf:
-            warnings.warn(
-                f"DOMIAS {variant} failed numerically ({type(err).__name__}: {err}); "
-                f"falling back to BNAF."
-            )
-            variant_used = "BNAF"
-            result = _run_domias_attack(
-                "BNAF", members, nonmembers, syn, ref_syn, reference_size, random_state, workspace
-            )
-        else:
-            raise
+    targets = None if tpr_at_fpr is None else np.atleast_1d(tpr_at_fpr).astype(float)
 
-    return {
-        "aucroc": float(result["aucroc"]),
-        "accuracy": float(result["accuracy"]),
-        "variant_used": variant_used,
-        "reference_size": int(reference_size),
-        "n_features_used": len(common),
-        "dropped_constant_columns": dropped,
+    out = {
+        "mia_auc": _auc(d_mem, d_non),
+        "n_members": int(len(d_mem)),
+        "n_nonmembers": int(len(d_non)),
     }
+    if targets is not None:
+        for t in targets:
+            out[f"tpr@fpr={t:g}"] = _tpr_at_fpr(d_mem, d_non, t)
+
+    if bootstrap:
+        # Resample member and non-member distances (with replacement, separately) and re-score.
+        # The synthetic reference is fixed, so the CI reflects the finite real sets -- the right
+        # notion, since resampling *who is a member* would require retraining the generator.
+        # AUC and every TPR@FPR share the same resamples so their CIs are mutually consistent.
+        rng = np.random.default_rng(random_state)
+        boot_auc = []
+        boot_tpr = {} if targets is None else {t: [] for t in targets}
+        for _ in range(n_bootstrap):
+            bm = rng.choice(d_mem, size=len(d_mem), replace=True)
+            bn = rng.choice(d_non, size=len(d_non), replace=True)
+            boot_auc.append(_auc(bm, bn))
+            for t in boot_tpr:
+                boot_tpr[t].append(_tpr_at_fpr(bm, bn, t))
+        out["ci_low"], out["ci_high"] = (float(v) for v in np.percentile(boot_auc, [2.5, 97.5]))
+        for t, vals in boot_tpr.items():
+            lo, hi = np.percentile(vals, [2.5, 97.5])
+            out[f"tpr@fpr={t:g}_ci_low"], out[f"tpr@fpr={t:g}_ci_high"] = float(lo), float(hi)
+
+    return out
 
 
 def estimate_agreement(real_ci, augmented_est):
