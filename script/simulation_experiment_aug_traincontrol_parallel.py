@@ -147,10 +147,12 @@ def run(MC_id):
     # miss_file = os.path.join(base_path, "Missing.csv")
     # true_miss_file = None
 
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", #"HI-VAE_lognormal", 
-                      "Surv-GAN", "Surv-VAE", 
-                      "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
-                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+    # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", #"HI-VAE_lognormal", 
+    #                   "Surv-GAN", "Surv-VAE", 
+    #                   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+    #                   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+    
+    generators_sel = ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     # generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
@@ -269,7 +271,8 @@ def run(MC_id):
                                                                         gen_from_prior=gen_from_prior, norm_mode="global",
                                                                         n_generated_sample=max(treated.shape[0], control.shape[0]),
                                                                         differential_privacy=differential_privacy,
-                                                                        diffusion=diffusion)
+                                                                        diffusion=diffusion,
+                                                                        diffusion_var="y")
                 else:
                     data_gen_control = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                         target_column="censor", time_to_event_column="time", 
@@ -384,7 +387,7 @@ def run(MC_id):
 
     MC_init = MC_id * n_MC_exp + 1
     MC_final = (MC_id + 1) * n_MC_exp
-    results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_{metric_optuna}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
+    results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_yDiff_{metric_optuna}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
 
     # tout à la fin de run(), après le to_csv
     os.chdir(original_dir)

@@ -244,6 +244,72 @@ class HIVAE(nn.Module):
             "p_params": p_params,
             "q_params": q_params,
         }
+    
+
+    def diffusion_forward_y(
+        self,
+        batch_data_observed,
+        batch_data,
+        batch_miss,
+        tau: float = 1.0,
+        n_generated_dataset: int = 1,
+        diffusion_hidden_dim: int = 32,
+        diffusion_n_steps: int = 100,
+        diffusion_n_epochs: int = 200,
+        diffusion_batch_size: int = 2000,
+        diffusion_lr: float = 1e-3,
+    ):
+        """
+        Encode → fit latent diffusion model → sample → decode.
+
+        The score network is trained from scratch on the encoded latents of
+        the current batch, then used to draw new latent samples that are
+        decoded exactly like the standard forward pass.
+        """
+        # ── 1. Normalize & encode ──────────────────────────────────────
+        X_list, normalization_params = data_processing.normalize_features(
+            batch_data_observed, self.feat_types_list, batch_miss,
+            feat_normalization_globals=self.feat_normalization_globals,
+        )
+        X = torch.cat(X_list, dim=1)
+        q_params, samples = self.encode(X, tau)
+
+        # ── 2. Fit diffusion on encoded latents ───────────────────────
+        latent_dim = self.y_dim
+        latents_np = jnp.array(samples["y"].detach().numpy())
+        n_generated_sample = samples["y"].shape[0]
+
+        diffusion = LatentDiffusion(
+            latent_dim=latent_dim,
+            hidden_dim=diffusion_hidden_dim,
+            n_steps=diffusion_n_steps,
+            n_epochs=diffusion_n_epochs,
+            batch_size=diffusion_batch_size,
+            lr=diffusion_lr,
+        )
+        diffusion.fit(latents_np)
+        # diffusion.plot_convergence()
+
+        # ── 3. Sample new latents & convert to torch ──────────────────
+        diffusion_samples = diffusion.sample(n_generated_sample)
+        samples["y"] = torch.tensor(np.array(diffusion_samples), dtype=torch.float32)
+
+        # ── 4. Decode & compute loss ──────────────────────────────────
+        # p_params, log_p_x, log_p_x_missing, samples = self.decode(
+        #     samples, batch_data, batch_miss, normalization_params, n_generated_dataset
+        # )
+        grouped_samples_y = data_processing.y_partition(samples["y"], self.feat_types_list, self.y_dim_partition)
+        # Compute θ parameters    
+        theta = theta_estimation.theta_estimation_from_ys(grouped_samples_y, samples["s"], self.feat_types_list, batch_miss, self.theta_layer)
+        # Compute log-likelihood and reconstructed data
+        _, _, _, samples["x"] = likelihood.loglik_evaluation(
+            batch_data, self.feat_types_list, batch_miss, theta, normalization_params, n_generated_dataset
+        )
+        # ELBO, loss_reconstruction, KL_z, KL_s = self.loss_function(log_p_x, p_params, q_params)
+
+        return {
+            "samples": samples
+        }
 
     def decode(self, samples, batch_data_list, miss_list, normalization_params, n_generated_dataset=1):
         """

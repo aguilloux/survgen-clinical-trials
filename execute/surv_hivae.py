@@ -330,7 +330,7 @@ def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat
 # GENERATION FUNCTIONS: without conditioning on a feature value.
 # ──────────────────────────────────────────────────────────────
  
-def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffusion=False, diffusion_params=None, apply_rounding=False):
+def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffusion=False, diffusion_params=None, apply_rounding=False, diffusion_var="z"):
     """
         Generation from a trained HIVAE, without conditioning. 
         If `n_generated_sample` is specified, generation is performed on an extended dataset of that size (with samples drawn with replacement from the original data) 
@@ -379,8 +379,14 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
         else:
             if diffusion:
                 diffusion_kwargs = diffusion_params or {}
-                vae_res = vae_model.diffusion_forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
+                if diffusion_var == "z":
+                    vae_res = vae_model.diffusion_forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
                                                     **diffusion_kwargs)
+                elif diffusion_var == "y":
+                    vae_res = vae_model.diffusion_forward_y(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
+                                                    **diffusion_kwargs)
+                else:
+                    raise ValueError(f"Invalid diffusion_var: {diffusion_var}. Must be 'z' or 'y'.")
             else:
                 vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
             samples_list.append(vae_res["samples"])
@@ -461,7 +467,7 @@ def _validate_norm_mode(norm_mode, differential_privacy):
 def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
         n_generated_sample=None, params=None, verbose=True, plot=False, 
         gen_from_prior=False, condition=None, differential_privacy=False,
-        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False, apply_rounding=False,
+        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False, apply_rounding=False, diffusion_var="z",
         **hp_overrides):
     """
         End-to-end entry point: build a HIVAE, train it on `df`, and generate `n_generated_dataset` synthetic datasets.
@@ -520,7 +526,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
             if condition is not None:
                 est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
             else:
-                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding)
+                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, diffusion_var=diffusion_var)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
@@ -528,7 +534,7 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
         if condition is not None:
             est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
         else:
-            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding)
+            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, diffusion_var=diffusion_var)
 
         if plot:
             loss_track = {"epoch": list(range(1, len(loss_train) + 1)),
@@ -799,7 +805,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                  tune_params=None, fixed_params=None, norm_mode="global",
                                  screening_epochs=800, n_startup_trials=20, 
                                  differential_privacy=False, diffusion=False, do_prune=False, apply_rounding=False,
-                                 diffusion_pre_params=None):
+                                 diffusion_pre_params=None, diffusion_var="z"):
     
     # differential_privacy = "_DP" in generator_name
     if tune_epsilon and not differential_privacy:
@@ -898,7 +904,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
                                                                    n_generated_sample=n_gen_sample, from_prior=gen_from_prior,
                                                                    diffusion=diffusion, diffusion_params=diffusion_params,
-                                                                   apply_rounding=apply_rounding)
+                                                                   apply_rounding=apply_rounding, diffusion_var=diffusion_var)
                     scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
                     
             # ----------------------------------------------------------
@@ -943,7 +949,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
                     est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, 
                                                                    feat_types_dict, n_generated_dataset=n_generated_dataset, 
-                                                                   n_generated_sample=data.shape[0], from_prior=gen_from_prior, diffusion=diffusion)
+                                                                   n_generated_sample=data.shape[0], from_prior=gen_from_prior, diffusion=diffusion, diffusion_var=diffusion_var)
                     scores = _evaluate_generation(est_data_gen_transformed, full_data_loader, metrics_list, columns)
 
             # # ----------------------------------------------------------
