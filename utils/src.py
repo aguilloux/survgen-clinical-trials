@@ -273,6 +273,7 @@ class HIVAE(nn.Module):
         )
         X = torch.cat(X_list, dim=1)
         q_params, samples = self.encode(X, tau)
+        samples["y"] = self.y_layer(samples["z"])
 
         # ── 2. Fit diffusion on encoded latents ───────────────────────
         latent_dim = self.y_dim
