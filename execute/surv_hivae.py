@@ -831,10 +831,11 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
             do_prune = False  # Pruning is not supported in multi-objective optimization, so we disable it when multiple metrics are provided.
             print("[Warning] Multiple metrics detected, disabling pruning since it's not supported in multi-objective optimization.")
 
+    if diffusion_pre_params is not None:
+        tune_params = ["diffusion_hidden_dim", "diffusion_batch_size", "diffusion_lr"]
+
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
-        if diffusion_pre_params is not None:
-            tune_params = ["diffusion_hidden_dim", "diffusion_batch_size", "diffusion_lr"]
         hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
