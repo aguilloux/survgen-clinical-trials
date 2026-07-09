@@ -168,7 +168,7 @@ def run(MC_id):
                         }
     
     # MONTE-CARLO EXPERIMENT
-    n_MC_exp = 10
+    n_MC_exp = 5
     treat_effects = np.arange(0., 1.1, 0.2)
     list_n_samples_control = [(1/3), (2/3), 1.0]
     n_generated_dataset = 200
@@ -280,6 +280,7 @@ def run(MC_id):
                     best_params = best_params_dict[generator_name]
                     if "HI-VAE" in generator_name:
                         best_params["epochs"] = 5000
+                        best_params["max_grad_norm"] = 1.0
                         gen_from_prior = "_prior" in generator_name
                         # differential_privacy = "_DP" in generator_name
                         differential_privacy = True
