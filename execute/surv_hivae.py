@@ -839,7 +839,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
         hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
-        max_grad_norm = params.get("max_grad_norm", None)
+        max_grad_norm = params.get("max_grad_norm", 10.0)
         epochs = params["epochs"]
         if diffusion_pre_params is not None:
             params["z_dim"] = diffusion_pre_params["z_dim"]
