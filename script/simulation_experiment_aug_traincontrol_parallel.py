@@ -206,7 +206,8 @@ def run(MC_id):
 
         # BEST PARAMETERS
         best_params_dict = {}
-        name_config = "simu_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, int(perc_control*3 + 0.01), n_features_bytype, int(treatment_effect_hyperopt))
+        # name_config = "simu_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, int(perc_control*3 + 0.01), n_features_bytype, int(treatment_effect_hyperopt))
+        name_config = "sim_yDiff_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, int(perc_control*3 + 0.01), n_features_bytype, int(treatment_effect_hyperopt))
         n_trials = 150
         for generator_name in generators_sel:
             # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
