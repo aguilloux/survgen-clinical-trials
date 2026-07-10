@@ -2,7 +2,7 @@
 #SBATCH --job-name=sim_exp_aug_traincontrol_parallel
 #SBATCH --output=logs/sim_exp_aug_traincontrol_%A_%a.out
 #SBATCH --error=logs/sim_exp_aug_traincontrol_%A_%a.err
-#SBATCH --array=5-9  # one task per MC
+#SBATCH --array=0-9  # one task per MC
 #SBATCH --cpus-per-task=4
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
