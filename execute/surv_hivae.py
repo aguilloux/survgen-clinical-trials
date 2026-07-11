@@ -145,6 +145,7 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
         tau = max(1.0 - 0.01 * global_epoch, 1e-3)
 
         n_batches_seen = 0
+        n_skipped_batches = 0
         for batch_data_list, batch_miss_list in train_loader:
             # Mask unknown data (set unobserved values to zero)
             data_list_observed = [data * batch_miss_list[:, i].view(data.shape[0], 1) for i, data in enumerate(batch_data_list)]
@@ -152,6 +153,13 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
             # Compute loss
             optimizer.zero_grad()
             vae_res = vae_model.forward(data_list_observed, batch_data_list, batch_miss_list, tau, n_generated_dataset=1)
+            # A collapsing per-feature variance (see loglik_real/loglik_pos) can still overflow
+            # the forward pass to inf/nan despite the clamps there. Once that happens, backward()
+            # yields non-finite gradients that clip_grad_norm_ cannot fix (norm of a nan is nan),
+            # and optimizer.step() would permanently poison the weights. Skip the batch instead.
+            if not torch.isfinite(vae_res["neg_ELBO_loss"]):
+                n_skipped_batches += 1
+                continue
             vae_res["neg_ELBO_loss"].backward()
             torch.nn.utils.clip_grad_norm_(vae_model.parameters(), max_norm=max_grad_norm)
             optimizer.step()
@@ -186,6 +194,9 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
         # Save error
         error_observed_train.append(torch.mean(error_observed_samples))
         error_missing_train.append(torch.mean(error_missing_samples))
+
+        if verbose and n_skipped_batches > 0:
+            print(f"  [epoch {global_epoch}] skipped {n_skipped_batches} batch(es) with non-finite loss")
 
         if verbose and global_epoch % 100 == 0:
             visualization.print_loss(global_epoch, start_time, -avg_loss, avg_KL_s, avg_KL_z)
@@ -518,15 +529,18 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
         raise ValueError("target_epsilon must be set when differential_privacy=True.")
     model_hivae, loss_train, loss_val = train_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, 
                                                     batch_size, lr, epochs, verbose, seed=seed, norm_mode=norm_mode, 
-                                                    differential_privacy=differential_privacy, target_epsilon=target_epsilon, target_delta=target_delta, max_grad_norm=params["max_grad_norm"])
+                                                    differential_privacy=differential_privacy, target_epsilon=target_epsilon, 
+                                                    target_delta=target_delta, max_grad_norm=params["max_grad_norm"])
     
     if isinstance(n_generated_sample, list):
         est_data_gen_transformed_list = []
         for n_generated_sample_ in n_generated_sample:
             if condition is not None:
-                est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
+                est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
+                                                                         n_generated_sample_, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
             else:
-                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, diffusion_var=diffusion_var)
+                est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
+                                                               n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, diffusion_var=diffusion_var)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
