@@ -140,7 +140,12 @@ def loglik_real(batch_data, list_type, theta, normalization_params, n_generated_
     # Extract data and missing mask
     data, missing_mask = batch_data
     missing_mask = missing_mask.float()
-    epsilon = 1e-3  # Small constant for numerical stability
+    # Small constant for numerical stability. Floored well above float precision:
+    # softplus(x) ~ exp(x) for very negative x, so a shrinking pre-softplus parameter
+    # collapses the variance exponentially fast, which blows up the 1/var reconstruction
+    # term. A looser floor here trades a bit of bias for training stability, especially
+    # under DP-SGD noise on small datasets.
+    epsilon = 1e-2
 
     # Retrieve normalization parameters and ensure stability
     data_mean, data_var = normalization_params
@@ -159,7 +164,8 @@ def loglik_real(batch_data, list_type, theta, normalization_params, n_generated_
     log_variance_term = -0.5 * torch.sum(torch.log(est_var), dim=1)
     log_exponent = -0.5 * torch.sum((data - est_mean) ** 2 / est_var, dim=1)
 
-    log_p_x = log_exponent + log_variance_term + log_normalization
+    # Clamp so a single collapsing-variance sample can't overflow the batch loss to inf/nan.
+    log_p_x = torch.clamp(log_exponent + log_variance_term + log_normalization, min=-1e4, max=1e4)
 
     # Generate output dictionary
     output = {
@@ -727,7 +733,10 @@ def loglik_pos(batch_data, list_type, theta, normalization_params, n_generated_d
         - `log_p_x_missing`: Log-likelihood of missing data.
         - `samples`: Sampled values from the estimated log-normal distribution.
     """
-    epsilon = 1e-3
+    # See loglik_real for why this floor is 1e-2 rather than 1e-3: softplus(x) ~ exp(x) for
+    # very negative x, so a shrinking pre-softplus parameter collapses the variance
+    # exponentially fast, which blows up the 1/var reconstruction term.
+    epsilon = 1e-2
 
     # Extract normalization parameters
     data_mean_log, data_var_log = normalization_params
@@ -746,10 +755,14 @@ def loglik_pos(batch_data, list_type, theta, normalization_params, n_generated_d
     est_mean = torch.sqrt(data_var_log) * est_mean + data_mean_log
     est_var = data_var_log * est_var
 
-    # Compute log-likelihood
-    log_p_x = -0.5 * torch.sum((data_log - est_mean) ** 2 / est_var, dim=1) \
-              - 0.5 * torch.sum(torch.log(2 * torch.pi * est_var), dim=1) \
-              - torch.sum(data_log, dim=1)
+    # Compute log-likelihood. Clamp so a single collapsing-variance sample can't overflow
+    # the batch loss to inf/nan.
+    log_p_x = torch.clamp(
+        -0.5 * torch.sum((data_log - est_mean) ** 2 / est_var, dim=1)
+        - 0.5 * torch.sum(torch.log(2 * torch.pi * est_var), dim=1)
+        - torch.sum(data_log, dim=1),
+        min=-1e4, max=1e4
+    )
 
     max_threshold = 2. * max(data).item()
     # max_threshold = 1e20
