@@ -153,7 +153,14 @@ def train_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, bat
             optimizer.zero_grad()
             vae_res = vae_model.forward(data_list_observed, batch_data_list, batch_miss_list, tau, n_generated_dataset=1)
             vae_res["neg_ELBO_loss"].backward()
-            torch.nn.utils.clip_grad_norm_(vae_model.parameters(), max_norm=max_grad_norm)
+            # Manual gradient clipping only applies to the non-DP path: under DP,
+            # Opacus' DPOptimizer.step() recomputes param.grad from the per-sample
+            # gradients (clip to max_grad_norm + noise) and overwrites whatever this
+            # would set, so clipping here is dead work. Guarding on `max_grad_norm is
+            # not None` also avoids clip_grad_norm_ raising on the non-DP default
+            # (max_grad_norm resolves to None when it isn't a tuned/fixed HP).
+            if not differential_privacy and max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(vae_model.parameters(), max_norm=max_grad_norm)
             optimizer.step()
 
             avg_loss += vae_res["neg_ELBO_loss"].item()
