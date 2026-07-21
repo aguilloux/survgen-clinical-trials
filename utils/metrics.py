@@ -592,6 +592,7 @@ def membership_inference_attack(
     n_bootstrap=1000,
     random_state=1,
     tpr_at_fpr=(0.1, 0.2),
+    return_boot_auc=False,
 ):
     """
     GAN-Leaks full black-box membership inference attack (MIA) against synthetic data.
@@ -632,12 +633,18 @@ def membership_inference_attack(
             target of ``f`` rests on about ``f * n_nonmembers`` holdout records -- keep at least
             ~15-20 there (e.g. FPR >= 0.1 at ~180 non-members), or the estimate is single-record
             noise. Always read the TPR@FPR values with their bootstrap CIs.
+        return_boot_auc (bool): When ``bootstrap=True``, also return the full vector of the
+            ``n_bootstrap`` resampled AUCs (not just its CI bounds), so the caller can inspect or
+            re-aggregate the bootstrap distribution. Ignored when ``bootstrap=False``. Defaults
+            to False.
 
     Returns:
         dict: {"mia_auc": float, "n_members": int, "n_nonmembers": int}, plus one
             "tpr@fpr=<f>" entry per requested ``tpr_at_fpr`` target, and, when ``bootstrap=True``,
             also {"ci_low": float, "ci_high": float} for the AUC and
-            "tpr@fpr=<f>_ci_low"/"tpr@fpr=<f>_ci_high" for each target.
+            "tpr@fpr=<f>_ci_low"/"tpr@fpr=<f>_ci_high" for each target. When additionally
+            ``return_boot_auc=True``, a {"boot_auc": np.ndarray} entry holding the whole vector of
+            resampled AUCs.
 
     Note:
         The AUC's precision is set by the number of member / non-member records, not by how much
@@ -733,6 +740,8 @@ def membership_inference_attack(
             for t in boot_tpr:
                 boot_tpr[t].append(_tpr_at_fpr(bm, bn, t))
         out["ci_low"], out["ci_high"] = (float(v) for v in np.percentile(boot_auc, [2.5, 97.5]))
+        if return_boot_auc:
+            out["boot_auc"] = np.asarray(boot_auc, dtype=float)
         for t, vals in boot_tpr.items():
             lo, hi = np.percentile(vals, [2.5, 97.5])
             out[f"tpr@fpr={t:g}_ci_low"], out[f"tpr@fpr={t:g}_ci_high"] = float(lo), float(hi)

@@ -256,6 +256,24 @@ def visualize_general_perf(scores, metrics, title = None):
     plt.tight_layout(pad=3)
     plt.show()
 
+def _whisker_extent(values, whis=1.5):
+    """
+    Tukey whisker range for a 1-D array, matching seaborn/matplotlib boxplots.
+
+    Returns (low, high): the most extreme data points within ``whis`` * IQR of
+    the box (Q1/Q3). NaNs are dropped; returns (None, None) if nothing is left.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[~np.isnan(values)]
+    if values.size == 0:
+        return None, None
+    q1, q3 = np.percentile(values, [25, 75])
+    iqr = q3 - q1
+    low = values[values >= q1 - whis * iqr].min()
+    high = values[values <= q3 + whis * iqr].max()
+    return low, high
+
+
 def visualize_grouped_perf(scores, dict_metrics, fontsize=20, panel_width=None,
                            height=6, suptitle=None):
     """
@@ -270,7 +288,12 @@ def visualize_grouped_perf(scores, dict_metrics, fontsize=20, panel_width=None,
     Args:
         scores (DataFrame): performance metrics for the different generators.
         dict_metrics (dict): {group_title: [[metric_name, opt], ...], ...}, where
-            ``opt`` is "min" or "max" (controls the direction arrow on the y-label).
+            ``opt`` controls the y-label annotation. Use "min" / "max" for a
+            plain direction arrow (← / →). Alternatively pass a float to mark an
+            ideal target value (e.g. 0.5 for identifiability_score): the arrow
+            then points toward the target when every generator's box sits on one
+            side of it, and is replaced by a dotted red reference line at the
+            target when the pooled whisker range brackets it.
         fontsize (int): font size used for every text element.
         panel_width (float): width in inches allotted to each metric panel. If None,
             it scales with the number of generators so boxes are never squished.
@@ -306,7 +329,31 @@ def visualize_grouped_perf(scores, dict_metrics, fontsize=20, panel_width=None,
                         linewidth=2, saturation=1, palette='colorblind',
                         width=1, gap=0.15, whis=1.5, linecolor="Black")
 
-            opt_arrow = {"max": ' →', "min": ' ←'}.get(opt, "")
+            if isinstance(opt, (int, float)) and not isinstance(opt, bool):
+                # metric with an ideal target value rather than a min/max goal.
+                # Pool the whisker extents of every generator's box, then compare
+                # the overall [low, high] range against the target: if it brackets
+                # the target there is no meaningful direction (mark it with a
+                # dotted red reference line instead); otherwise the arrow points
+                # the way that moves the boxes toward the target.
+                ideal = float(opt)
+                lows, highs = [], []
+                for _, grp in scores.groupby('generator')[metric_name]:
+                    lo, hi = _whisker_extent(grp.values, whis=1.5)
+                    if lo is not None:
+                        lows.append(lo)
+                        highs.append(hi)
+                overall_low = min(lows) if lows else ideal
+                overall_high = max(highs) if highs else ideal
+                if overall_low <= ideal <= overall_high:
+                    opt_arrow = ""
+                    ax.axhline(ideal, ls=":", color="red", lw=2, zorder=10)
+                elif overall_high < ideal:
+                    opt_arrow = ' →'  # boxes below target -> increase toward it
+                else:
+                    opt_arrow = ' ←'  # boxes above target -> decrease toward it
+            else:
+                opt_arrow = {"max": ' →', "min": ' ←'}.get(opt, "")
             ax.set_xlabel('')
             ax.set_ylabel(metric_name + opt_arrow, fontweight="semibold", fontsize=fontsize)
             ax.tick_params(axis='x', labelsize=fontsize)

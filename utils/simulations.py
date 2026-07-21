@@ -232,7 +232,7 @@ def simulation(treatment_effect, n_samples, independent = True, feature_types_li
         names.append("survcens")
         
         types = np.concatenate([np.repeat(feat_type, n_features_bytype) for feat_type in feature_types_list]).tolist()
-        types.append("surv")
+        types.append("surv_weibull")
 
         dims = np.repeat(1, n_feature_types * n_features_bytype).tolist()
         dims.append(2)
