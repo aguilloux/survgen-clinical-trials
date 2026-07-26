@@ -8,11 +8,14 @@ Created on Mon Feb 17 20:35:11 2025
 @author: Van Tuan NGUYEN
 """
 
+import re
 import time
+from fractions import Fraction
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
 import seaborn as sns
 sns.set(style="whitegrid", font="STIXGeneral", context="talk", palette="colorblind")
 
@@ -256,6 +259,173 @@ def visualize_general_perf(scores, metrics, title = None):
     plt.tight_layout(pad=3)
     plt.show()
 
+def _fraction_label(value, max_denominator=20):
+    """
+    Render a float as a compact fraction string for an axis tick.
+
+    ``0.333 -> "1/3"``, ``0.6666 -> "2/3"``, ``1.0 -> "1"`` (whole numbers keep no
+    denominator). Uses ``Fraction.limit_denominator`` so slightly-off values such as
+    0.6666 still snap to the intended simple fraction.
+    """
+    frac = Fraction(float(value)).limit_denominator(max_denominator)
+    return str(frac.numerator) if frac.denominator == 1 else f"{frac.numerator}/{frac.denominator}"
+
+
+def _find_metric_frame(frames, metric_name):
+    """Return the first frame in ``frames`` that carries ``metric_name`` as a column."""
+    for frame in frames:
+        if metric_name in frame.columns:
+            return frame
+    return None
+
+
+def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette="colorblind",
+                                   xlabel="Training fraction ($\\upsilon$)", suptitle=None,
+                                   panel_size=(4, 2.5), fontsize=15, band_alpha=0.2, show=True):
+    """
+    Plot every metric against the augmentation/training fraction, one row per dataset.
+
+    Produces a grid of line plots laid out as ``(n_datasets, n_metrics)``: each row is
+    one dataset and each column one metric, with the augmentation fraction on the x-axis,
+    the metric value on the y-axis and one line per generator. Each point is the **mean**
+    of the metric over the samples of that (dataset, aug_pct, generator) cell, and the
+    shaded band spans **mean ± standard deviation**. The x-ticks are placed exactly on the
+    ``aug_pct`` values present in the data and labelled as fractions (0.333 -> 1/3,
+    0.6666 -> 2/3, 1.0 -> 1), matching the paper figure.
+
+    Args:
+        scores (DataFrame or list of DataFrame): one or several long-format score tables.
+            Each is in the ``general_scores_df`` / ``mia_scores_df_complete`` format (one
+            row per sample, one column per metric, plus a ``generator`` column) and must
+            additionally carry an ``aug_pct`` column (the fraction of the dataset used,
+            e.g. 0.333 / 0.6666 / 1.0) and a ``dataset_name`` column. Passing a list lets
+            you combine tables that don't share a row grain (e.g. per-generated-dataset
+            general scores and per-bootstrap MIA AUCs): every metric is looked up in the
+            first frame that carries it.
+        metrics (list): ``[[metric_name, opt], ...]``. ``opt`` is "min" / "max" (appends a
+            ↓ / ↑ arrow to the metric's column title, top row only) or a float target value
+            such as 0.5 for AUC-ROC (drawn as a dotted red reference line, no arrow).
+        generators (list): optional subset/order of generators to plot; defaults to the
+            generators present in the tables (sorted).
+        palette: seaborn palette (name or list) used to colour the generators, or a
+            ``{generator: color}`` dict for explicit control.
+        xlabel (str): x-axis label, drawn once under the bottom-centre panel.
+        suptitle (str): optional overall figure title.
+        panel_size (tuple): (width, height) in inches of a single panel.
+        fontsize (int): base font size for titles and axis labels.
+        band_alpha (float): opacity of the mean ± std band.
+        show (bool): call ``plt.show()`` before returning.
+
+    Returns:
+        matplotlib.figure.Figure: the figure, so it can be further tweaked or saved.
+    """
+    frames = [scores] if isinstance(scores, pd.DataFrame) else list(scores)
+    required = {"aug_pct", "dataset_name", "generator"}
+    clean = []
+    for i, frame in enumerate(frames):
+        missing_cols = required - set(frame.columns)
+        if missing_cols:
+            raise ValueError(f"scores[{i}] is missing required column(s): {sorted(missing_cols)}.")
+        frame = frame.copy()
+        frame["aug_pct"] = pd.to_numeric(frame["aug_pct"], errors="coerce")
+        clean.append(frame)
+    frames = clean
+
+    # map each metric to the frame that carries its column
+    metric_frames = []
+    for metric_name, opt in metrics:
+        frame = _find_metric_frame(frames, metric_name)
+        if frame is None:
+            raise ValueError(f"Metric '{metric_name}' is absent from every score table.")
+        metric_frames.append((metric_name, opt, frame))
+
+    # generators / datasets / aug-values pooled across all frames, keeping first-seen order
+    all_gen = pd.concat([f["generator"] for f in frames], ignore_index=True)
+    if generators is None:
+        generators = sorted(all_gen.unique())
+    dataset_names = list(dict.fromkeys(pd.concat([f["dataset_name"] for f in frames],
+                                                 ignore_index=True)))
+    aug_values = np.sort(pd.concat([f["aug_pct"] for f in frames],
+                                   ignore_index=True).dropna().unique())
+    aug_labels = [_fraction_label(v) for v in aug_values]
+
+    # stable colour per generator across every panel
+    if isinstance(palette, dict):
+        color_map = palette
+    else:
+        color_map = dict(zip(generators, sns.color_palette(palette, len(generators))))
+
+    n_rows, n_cols = len(dataset_names), len(metrics)
+    fig, axs = plt.subplots(n_rows, n_cols,
+                            figsize=(panel_size[0] * n_cols, panel_size[1] * n_rows),
+                            squeeze=False)
+    plt.subplots_adjust(hspace=.35, wspace=0.2)
+
+    for r, dataset_name in enumerate(dataset_names):
+        for c, (metric_name, opt, frame) in enumerate(metric_frames):
+            ax = axs[r][c]
+            for spine in ax.spines.values():
+                spine.set_linewidth(1)
+                spine.set_edgecolor("black")
+
+            # pre-aggregate: mean (point/line) and std (band) per generator × aug_pct
+            data_ds = frame[(frame["dataset_name"] == dataset_name)
+                            & frame["generator"].isin(generators)]
+            agg = (data_ds.groupby(["generator", "aug_pct"])[metric_name]
+                   .agg(["mean", "std"]).reset_index())
+
+            for generator_name in generators:
+                g = agg[agg["generator"] == generator_name].sort_values("aug_pct")
+                if g.empty:
+                    continue
+                x = g["aug_pct"].values
+                mean = g["mean"].values
+                std = np.nan_to_num(g["std"].values)  # single-sample cell -> zero-width band
+                color = color_map.get(generator_name)
+                ax.plot(x, mean, linestyle="--", marker="o", markersize=8, linewidth=2,
+                        color=color, label=generator_name)
+                ax.fill_between(x, mean - std, mean + std, color=color, alpha=band_alpha)
+
+            # float opt -> ideal-target reference line; "min"/"max" -> title arrow
+            if isinstance(opt, (int, float)) and not isinstance(opt, bool):
+                ax.axhline(float(opt), ls=":", color="red", lw=2, zorder=10)
+
+            # x-ticks exactly on the aug_pct values, shown as fractions
+            ax.set_xticks(aug_values)
+            ax.set_xticklabels(aug_labels)
+
+            # metric name + direction arrow as a column title on the top row only
+            if r == 0:
+                arrow = {"max": " ↑", "min": " ↓"}.get(opt, "")
+                ax.set_title(f"{metric_name}{arrow}", fontsize=fontsize, fontweight="semibold")
+
+            # dataset name as the row label on the leftmost column
+            ax.set_ylabel(dataset_name if c == 0 else "",
+                          fontsize=fontsize, fontweight="semibold")
+
+            # x-label once, under the bottom-centre panel
+            if r == n_rows - 1 and c == (n_cols - 1) // 2:
+                ax.set_xlabel(xlabel, fontsize=fontsize, fontweight="semibold")
+            else:
+                ax.set_xlabel("")
+
+            ax.tick_params(axis="x", labelsize=12)
+            ax.tick_params(axis="y", labelsize=12)
+
+    fig.align_labels()
+    # one shared legend built from the stable colour map (drawn generators only)
+    drawn = [g for g in generators if g in color_map]
+    handles = [Line2D([0], [0], color=color_map[g], linestyle="--", marker="o") for g in drawn]
+    if handles:
+        fig.legend(handles, drawn, ncol=min(len(drawn), 4), loc="lower center",
+                   bbox_to_anchor=(0.5, -0.02 - 0.02 * n_rows), fontsize=fontsize)
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=fontsize + 4, fontweight="semibold")
+    if show:
+        plt.show()
+    return fig
+
+
 def _whisker_extent(values, whis=1.5):
     """
     Tukey whisker range for a 1-D array, matching seaborn/matplotlib boxplots.
@@ -459,3 +629,165 @@ def plot_variable_heatmap(dict_list, names, title=None, cmap=BLUE_ORANGE,
         fig.text(0.5, 0.02, title, ha="center", va="bottom", fontweight="bold")
 
     plt.show()
+
+
+def _epsilon_from_generator(name):
+    """
+    Extract the privacy budget epsilon encoded in a generator name.
+
+    Recognises the ``..._eps_3``, ``..._eps3``, ``..._eps=3.5``, ``..._epsilon_1``
+    patterns (integer or decimal). Returns NaN when the name carries no epsilon,
+    which is how a non-DP baseline generator is identified.
+    """
+    m = re.search(r"eps(?:ilon)?[_\-=\s]*(\d+(?:\.\d+)?)", str(name), flags=re.IGNORECASE)
+    return float(m.group(1)) if m else np.nan
+
+
+def _flatten_metrics(metrics):
+    """
+    Normalise a metric specification into a flat list of ``(metric_name, opt, group)``.
+
+    Accepts the same shapes as ``visualize_grouped_perf``'s ``dict_metrics``
+    ({group: [[name, opt], ...]}), a flat list of ``[name, opt]`` pairs, or a
+    plain list of metric names (``opt`` then defaults to None = no arrow).
+    """
+    flat = []
+    if isinstance(metrics, dict):
+        for group_name, group_metrics in metrics.items():
+            for entry in group_metrics:
+                name, opt = (entry, None) if isinstance(entry, str) else (entry[0], entry[1])
+                flat.append((name, opt, group_name))
+    else:
+        for entry in metrics:
+            name, opt = (entry, None) if isinstance(entry, str) else (entry[0], entry[1])
+            flat.append((name, opt, None))
+    return flat
+
+
+def visualize_perf_vs_privacy(scores, metrics, epsilon_map=None, ncols=2,
+                              panel_size=(7.5, 5.5), fontsize=16, suptitle=None,
+                              dp_label="DP generator", nondp_label="No privacy (non-DP)",
+                              show=True):
+    """
+    Plot every metric against the privacy level, one panel per metric.
+
+    The x-axis is the privacy budget epsilon in increasing order, so LEFT -> RIGHT
+    means less and less private: the DP models come first sorted by increasing
+    epsilon (smaller epsilon = stronger privacy), and the non-DP baseline sits apart
+    on the far right (epsilon = infinity). Each point is the mean
+    over the generated datasets of that model, with the standard deviation as an
+    error bar; the DP models are connected by a line while the non-DP baseline is a
+    stand-alone diamond.
+
+    Args:
+        scores (DataFrame): long-format score table in the format of
+            ``score_df_complete`` (one row per generated dataset, one column per
+            metric, plus a ``generator`` column). Concatenate the
+            ``general_metrics_modular`` outputs of the non-DP and DP models, naming
+            the DP ones e.g. ``hivae_dp_eps_3``.
+        metrics: what to plot, in any of the shapes accepted by
+            ``visualize_grouped_perf``'s ``dict_metrics`` — a {group: [[name, opt], ...]}
+            dict, a list of ``[name, opt]`` pairs, or a list of metric names. ``opt``
+            is "min" / "max", shown as a direction arrow on the y-axis, or a float
+            target value (e.g. 0.5), drawn as a dotted red reference line (nothing is
+            added to the title in that case). The group name is not displayed.
+        epsilon_map (dict): optional {generator_name: epsilon} override, for generator
+            names the ``eps_<value>`` regex cannot parse. Use ``np.nan`` (or None) as
+            the value to flag a generator as the non-DP baseline.
+        ncols (int): number of panel columns in the grid.
+        panel_size (tuple): (width, height) in inches of a single panel.
+        fontsize (int): base font size for the axis labels and ticks.
+        suptitle (str): optional overall figure title.
+        dp_label, nondp_label (str): legend labels for the two series.
+        show (bool): call ``plt.show()`` before returning.
+
+    Returns:
+        matplotlib.figure.Figure: the figure, so it can be further tweaked or saved.
+    """
+    flat_metrics = _flatten_metrics(metrics)
+    missing = [m for m, _, _ in flat_metrics if m not in scores.columns]
+    if missing:
+        raise ValueError(f"Metrics absent from the score table: {missing}. "
+                         f"Available: {[c for c in scores.columns if c != 'generator']}")
+
+    # mean / std of every metric across the generated datasets of each generator
+    metric_names = [m for m, _, _ in flat_metrics]
+    grouped = scores.groupby('generator', sort=False)[metric_names]
+    means_by_gen, stds_by_gen = grouped.mean(), grouped.std()
+
+    generators = list(means_by_gen.index)
+    epsilon_map = epsilon_map or {}
+    eps = np.array([float(epsilon_map[g]) if epsilon_map.get(g) is not None
+                    else (np.nan if g in epsilon_map else _epsilon_from_generator(g))
+                    for g in generators])
+    is_dp = ~np.isnan(eps)
+
+    # x-axis = increasing privacy budget epsilon, so most private (left) -> least
+    # private (right); the non-DP baseline counts as epsilon = inf and lands last
+    order = np.argsort(np.where(is_dp, eps, np.inf))
+    generators = [generators[i] for i in order]
+    eps, is_dp = eps[order], is_dp[order]
+
+    # categorical x positions, with a visual gap isolating the non-DP baseline
+    x_pos = np.arange(len(generators), dtype=float)
+    if is_dp.any() and (~is_dp).any():
+        x_pos[~is_dp] += 0.6  # push the baseline right, set apart from the DP cluster
+    # a lone non-DP model needs no name on the axis; several of them do
+    single_baseline = (~is_dp).sum() == 1
+    x_labels = [(f"$\\epsilon$={eps_i:g}" if dp_i
+                 else ("No privacy" if single_baseline else str(gen)))
+                for gen, eps_i, dp_i in zip(generators, eps, is_dp)]
+
+    # A "min"/"max" goal is shown as a direction arrow ON the y-axis (not as text).
+    # The y-axis label is rotated 90° counter-clockwise, which turns a typed "↓" into
+    # a visual "→"; so we type the pre-rotation glyph that lands pointing the right way
+    # -- "←" renders as ↓ (min, lower is better) and "→" renders as ↑ (max, higher).
+    axis_arrow = {"min": "←", "max": "→"}
+    dp_color, np_color = sns.color_palette("colorblind")[0], sns.color_palette("colorblind")[3]
+
+    ncols = max(1, min(ncols, len(flat_metrics)))
+    nrows = int(np.ceil(len(flat_metrics) / ncols))
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(panel_size[0] * ncols, panel_size[1] * nrows),
+                             squeeze=False)
+    axes = axes.ravel()
+
+    for ax, (metric_name, opt, _group) in zip(axes, flat_metrics):
+        means = means_by_gen.loc[generators, metric_name].values.astype(float)
+        stds = stds_by_gen.loc[generators, metric_name].values.astype(float)
+
+        if is_dp.any():
+            ax.errorbar(x_pos[is_dp], means[is_dp], yerr=stds[is_dp],
+                        marker="o", markersize=8, capsize=4, linewidth=2,
+                        color=dp_color, label=dp_label)
+        if (~is_dp).any():
+            ax.errorbar(x_pos[~is_dp], means[~is_dp], yerr=stds[~is_dp],
+                        marker="D", markersize=10, capsize=4, linestyle="none",
+                        color=np_color, label=nondp_label)
+
+        # numeric target -> dotted red reference line, nothing added to the title;
+        # a "min"/"max" goal -> direction arrow appended to the y-axis label
+        if isinstance(opt, (int, float)) and not isinstance(opt, bool):
+            ax.axhline(float(opt), ls=":", color="red", lw=2, zorder=10)
+        ylabel = f"{metric_name}  {axis_arrow[opt]}" if opt in axis_arrow else metric_name
+
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(x_labels)
+        ax.set_xlabel("Privacy budget ($\\epsilon$)", fontsize=fontsize)
+        ax.set_ylabel(ylabel, fontweight="semibold", fontsize=fontsize)
+        ax.tick_params(axis='both', labelsize=fontsize - 2)
+        ax.set_title(metric_name, fontweight="semibold", fontsize=fontsize)
+        # reminder of the axis direction, anchored under the left (most private) end
+        ax.text(0.0, -0.135, "←\nmore private", transform=ax.transAxes,
+                ha="left", va="top", fontsize=fontsize - 2, color="0.25")
+        ax.legend(fontsize=fontsize - 3)
+
+    for ax in axes[len(flat_metrics):]:  # hide the unused cells of the grid
+        ax.set_visible(False)
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=fontsize + 4, fontweight="semibold")
+    plt.tight_layout()
+    if show:
+        plt.show()
+    return fig
