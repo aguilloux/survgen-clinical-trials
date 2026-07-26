@@ -251,8 +251,8 @@ def simulation(treatment_effect, n_samples, independent = True, feature_types_li
         return(control, treated, data_types)
 
     else :
-        return(control, treated)    
-
+        return(control, treated)
+    
 def cpower(mc , mi , loghaz, alpha):
     """
     mc : number of survivors in control arm
