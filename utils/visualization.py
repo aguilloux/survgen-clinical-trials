@@ -23,6 +23,14 @@ sns.set(style="whitegrid", font="STIXGeneral", context="talk", palette="colorbli
 BLUE_ORANGE = LinearSegmentedColormap.from_list("blue_orange",
                                                 ["#d8761d", "#f7f7f7", "#2166ac"])
 
+# colourblind-safe qualitative palette with maximally-separated hues. This is the
+# seaborn "colorblind" set with the vermillion (#d55e00) dropped in favour of the
+# purple (#cc78bc): vermillion sits too close to the gold (#de8f05), so two
+# generators would otherwise read as the same orange. Colours cycle if there are
+# more generators than entries.
+DISTINCT_PALETTE = ["#0173b2", "#de8f05", "#029e73", "#cc78bc",
+                    "#ca9161", "#949494", "#ece133", "#56b4e9"]
+
 from sksurv.nonparametric import kaplan_meier_estimator
 from lifelines import KaplanMeierFitter
 
@@ -279,7 +287,7 @@ def _find_metric_frame(frames, metric_name):
     return None
 
 
-def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette="colorblind",
+def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette=None,
                                    xlabel="Training fraction ($\\upsilon$)", suptitle=None,
                                    panel_size=(4, 2.5), fontsize=15, band_alpha=0.2, show=True):
     """
@@ -308,8 +316,9 @@ def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette="co
         generators (list): optional subset/order of generators to plot; defaults to the
             generators present in the tables (sorted).
         palette: seaborn palette (name or list) used to colour the generators, or a
-            ``{generator: color}`` dict for explicit control.
-        xlabel (str): x-axis label, drawn once under the bottom-centre panel.
+            ``{generator: color}`` dict for explicit control. Defaults to
+            ``DISTINCT_PALETTE`` (colourblind-safe, maximally-separated hues).
+        xlabel (str): x-axis label, drawn under every panel of the bottom row.
         suptitle (str): optional overall figure title.
         panel_size (tuple): (width, height) in inches of a single panel.
         fontsize (int): base font size for titles and axis labels.
@@ -350,6 +359,8 @@ def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette="co
     aug_labels = [_fraction_label(v) for v in aug_values]
 
     # stable colour per generator across every panel
+    if palette is None:
+        palette = DISTINCT_PALETTE
     if isinstance(palette, dict):
         color_map = palette
     else:
@@ -403,8 +414,8 @@ def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette="co
             ax.set_ylabel(dataset_name if c == 0 else "",
                           fontsize=fontsize, fontweight="semibold")
 
-            # x-label once, under the bottom-centre panel
-            if r == n_rows - 1 and c == (n_cols - 1) // 2:
+            # x-label under every panel of the bottom row
+            if r == n_rows - 1:
                 ax.set_xlabel(xlabel, fontsize=fontsize, fontweight="semibold")
             else:
                 ax.set_xlabel("")
@@ -417,8 +428,11 @@ def visualize_perf_vs_augmentation(scores, metrics, generators=None, palette="co
     drawn = [g for g in generators if g in color_map]
     handles = [Line2D([0], [0], color=color_map[g], linestyle="--", marker="o") for g in drawn]
     if handles:
-        fig.legend(handles, drawn, ncol=min(len(drawn), 4), loc="lower center",
-                   bbox_to_anchor=(0.5, -0.02 - 0.02 * n_rows), fontsize=fontsize)
+        # sit the legend below the x-labels of the bottom row (which now carry the
+        # x-axis title), leaving a clear gap so nothing overlaps the tick labels
+        fig.legend(handles, drawn, ncol=min(len(drawn), 4), loc="upper center",
+                   bbox_to_anchor=(0.5, -0.06 / n_rows), fontsize=fontsize,
+                   frameon=False, columnspacing=1.6, handletextpad=0.6)
     if suptitle is not None:
         fig.suptitle(suptitle, fontsize=fontsize + 4, fontweight="semibold")
     if show:
