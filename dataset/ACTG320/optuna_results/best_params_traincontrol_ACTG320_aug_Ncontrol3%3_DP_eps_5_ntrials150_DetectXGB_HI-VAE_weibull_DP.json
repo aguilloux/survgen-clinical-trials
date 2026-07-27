@@ -1,0 +1,1 @@
+{"z_dim": 40, "y_dim": 30, "s_dim": 4, "lr": 0.002, "batch_size": 115, "max_grad_norm": 0.1, "epochs": 1500}

@@ -155,10 +155,11 @@ def run(generator_name, target_epsilon):
                                                                                       diffusion=diffusion,
                                                                                       do_prune=False,
                                                                                       apply_rounding=True)
-    best_params_dict[generator_name] = best_params
+    best_params_full = dict_optimal_fix_params | best_params  # keep the non-DP fixed params alongside the tuned DP ones
+    best_params_dict[generator_name] = best_params_full
     study_dict[generator_name] = study
     with open(best_params_file, "w") as f:
-        json.dump(best_params, f)
+        json.dump(best_params_full, f)
 
     os.chdir(original_dir)
 
