@@ -485,8 +485,8 @@ def loglik_surv_weibull(batch_data, list_type, theta, normalization_params, n_ge
           max so that the tail of the censoring distribution is preserved.
     """
     min_shape = 1e-3
-    min_scale = 1e-3
-    max_shape = 1e3
+    min_scale = 5e-2
+    max_shape = 20
     max_scale = 1e3
 
 
