@@ -589,7 +589,7 @@ from synthcity.metrics.eval import Metrics
 from synthcity.plugins.core.dataloader import SurvivalAnalysisDataLoader
 
 
-def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_epsilon=False):
+def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_epsilon=False, differential_privacy=False):
     """
         Define the hyperparameter space for the model
 
@@ -617,7 +617,7 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_
        hp_space.append(CategoricalDistribution(name="n_layers_surv_piecewise", choices=[1, 2]))
        hp_space.append(CategoricalDistribution(name="n_intervals", choices=[5, 10, 15, 20]))
 
-    if "_DP" in generator_name:
+    if differential_privacy:
         hp_space.append(CategoricalDistribution(name="max_grad_norm", choices=[0.1, 0.3, 1.0, 3.0, 10.0]))
         hp_space.append(CategoricalDistribution(name="epochs", choices=[50, 100, 500, 1000, 1500]))
 
@@ -638,12 +638,12 @@ def hyperparameter_space(data, n_splits, generator_name, tune_params=None, tune_
 
     return hp_space
 
-def get_n_hyperparameters(generator_name):
-    """
-        Returns the number of hyperparameters for the SurVAE model.
-    """
-    hp_space = hyperparameter_space(data=np.zeros(10), n_splits=5, generator_name=generator_name)  # Dummy data for space definition
-    return len(hp_space)
+# def get_n_hyperparameters(generator_name):
+#     """
+#         Returns the number of hyperparameters for the SurVAE model.
+#     """
+#     hp_space = hyperparameter_space(data=np.zeros(10), n_splits=5, generator_name=generator_name)  # Dummy data for space definition
+#     return len(hp_space)
 
 def get_intervals(data, n_intervals):
     """
@@ -674,7 +674,7 @@ def get_diffusion_batchsize(n_samples):
 
     return batch_size
 
-def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=False):
+def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=False, differential_privacy=False):
     """
         Fail fast (before any Optuna trial runs) if hyperparameters needed by the
         objective won't be available at trial time.
@@ -686,7 +686,7 @@ def _validate_tune_and_fixed_params(data, n_splits, generator_name, tune_params,
         - When `tune_params` is given, every other HP in the space that isn't
         tuned must also be in `fixed_params`.
     """
-    full_hp_space = hyperparameter_space(data, n_splits, generator_name, tune_epsilon=tune_epsilon)
+    full_hp_space = hyperparameter_space(data, n_splits, generator_name, tune_epsilon=tune_epsilon, differential_privacy=differential_privacy)
     available = {d.name for d in full_hp_space}
     fixed_keys = set(fixed_params or {})
 
@@ -816,8 +816,10 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
                                  screening_epochs=800, n_startup_trials=20, 
                                  differential_privacy=False, diffusion=False, do_prune=False, apply_rounding=False,
                                  diffusion_pre_params=None, diffusion_var="z"):
-    
-    # differential_privacy = "_DP" in generator_name
+
+    if "_DP" in generator_name:
+        differential_privacy = True
+        
     if tune_epsilon and not differential_privacy:
         raise ValueError("tune_epsilon=True requires differential_privacy=True.")
     if differential_privacy and target_epsilon is None and not tune_epsilon:
@@ -827,7 +829,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
         )
 
     _validate_norm_mode(norm_mode, differential_privacy=differential_privacy)
-    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=tune_epsilon)
+    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=tune_epsilon, differential_privacy=differential_privacy)
 
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
     if condition is not None and cond_df is not None:
@@ -846,7 +848,7 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
 
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
-        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
+        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon, differential_privacy=differential_privacy)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
         max_grad_norm = params.get("max_grad_norm", 10.0)
@@ -1079,7 +1081,9 @@ def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_
         HPO METHOD: val_loss
         Use the final validation loss directly — no generation step.
     """
-    # differential_privacy = "_DP" in generator_name
+    if "_DP" in generator_name:
+        differential_privacy = True
+        
     if tune_epsilon and not differential_privacy:
         raise ValueError("tune_epsilon=True requires differential_privacy=True.")
     if differential_privacy and target_epsilon is None and not tune_epsilon:
@@ -1089,13 +1093,13 @@ def optuna_hyperparameter_search_HIVAE_loss(df, miss_mask, true_miss_mask, feat_
         )
 
     _validate_norm_mode(norm_mode, differential_privacy=differential_privacy)
-    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=tune_epsilon)
+    _validate_tune_and_fixed_params(df, n_splits, generator_name, tune_params, fixed_params, tune_epsilon=tune_epsilon, differential_privacy=differential_privacy)
 
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
 
     def objective(trial: optuna.Trial):
         set_seed(seed=seed)
-        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon)
+        hp_space = hyperparameter_space(df, n_splits, generator_name, tune_params=tune_params, tune_epsilon=tune_epsilon, differential_privacy=differential_privacy)
         sampled = suggest_all(trial, hp_space) # dict of tuned hyperparameters
         params = {**(fixed_params or {}), **sampled}
         epochs = params["epochs"]
