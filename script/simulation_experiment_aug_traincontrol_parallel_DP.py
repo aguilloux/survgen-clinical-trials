@@ -116,7 +116,7 @@ def run(MC_id):
 
     treatment_effect_hyperopt = 0.0 # 0.0
 
-    metric_optuna = "detection_xgb"
+    metric_optuna = ["detection_xgb"]
     dataset_name = "Simulations_aug_indep_traincontrol"
     # dataset_name = "Simulations_aug_dep_traincontrol"
     current_path = os.getcwd()  # Get current working directory
@@ -398,7 +398,7 @@ def run(MC_id):
 
     MC_init = MC_id * n_MC_exp + 1
     MC_final = (MC_id + 1) * n_MC_exp
-    results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_DP_bestHP_3%3_{metric_optuna}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
+    results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_DP_bestHP_3%3_{metric_optuna[0]}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
 
     # tout à la fin de run(), après le to_csv
     os.chdir(original_dir)
