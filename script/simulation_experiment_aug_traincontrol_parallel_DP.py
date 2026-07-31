@@ -189,6 +189,7 @@ def run(MC_id):
     coef_init_univ_list = []
     H0_coef = []
     aug_percs = []
+    aug_eps = []
     log_p_value_init = []
     est_cox_coef_init = []
     est_cox_coef_se_init = []
