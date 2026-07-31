@@ -211,9 +211,15 @@ def run(MC_id):
             n_trials = 150
             for generator_name in generators_sel:
                 # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
+                dict_optimal_fix_params_file = os.path.join(base_path, "optuna_results", "best_params_{}_ntrials{}_{}_{}.json").format(name_config, n_trials, metric_optuna[0], generator_name)
+                with open(dict_optimal_fix_params_file, "r") as f:
+                    source_best_params = json.load(f)
+                    dict_optimal_fix_params = {key: value for key, value in source_best_params.items() if key not in ['lr', 'batch_size']}
                 best_params_file = os.path.join(base_path, "optuna_results", "best_params_{}_ntrials{}_{}_{}_DP_eps{}.json").format(name_config, n_trials, metric_optuna[0], generator_name, int(eps))
                 with open(best_params_file, "r") as f:
-                    best_params_dict[generator_name] = json.load(f)
+                    best_params = json.load(f)
+                    best_params_full = dict_optimal_fix_params | best_params 
+                    best_params_dict[generator_name] = best_params_full
 
             # Seed
             seed = MC_id * n_MC_exp # 0, 10, 20, .. 
