@@ -183,7 +183,7 @@ def run(dataset_name, generators_sel):
                 log_p_value_control_list = []
                 for j in range(n_generated_dataset):
                     df_gen_control_j = pd.DataFrame(data_gen_control_dict[generator_name][j].numpy(), columns=fnames)
-                    df_gen_control_j.to_csv(save_gen_data_dir + "df_gen_control_" + "aug_Ncontrol{}%3_".format((d+1)) + generator_name  + "_" + optuna_version_name + "_{}.csv".format(j), index=False)
+                    df_gen_control_j.to_csv(save_gen_data_dir + "df_gen_control_" + "aug_Ncontrol3%3_".format((d+1)) + generator_name  + "_" + optuna_version_name + "_{}.csv".format(j), index=False)
                     df_gen_control_j['treatment'] = 0
                     list_df_gen_control.append(df_gen_control_j)
                     data_syn.append(pd.concat([df_init_treated, df_gen_control_j], ignore_index=True))
@@ -199,18 +199,18 @@ def run(dataset_name, generators_sel):
             if not os.path.exists(save_res_dir):
                 os.makedirs(save_res_dir)
 
-            df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_p_value_df.csv'.format((d+1), int(eps)), index=False)
+            df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_p_value_df.csv'.format((d+1), int(eps)), index=False)
             general_scores = []
             for generator_name in generators_sel:
                 general_scores.append(general_metrics(df_init_control, df_gen_control_dict[generator_name], generator_name))
             general_scores_df = pd.concat(general_scores)
-            general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_general_scores_df.csv'.format((d+1), int(eps)), index=False)
+            general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_general_scores_df.csv'.format((d+1), int(eps)), index=False)
 
             replicability_scores = []
             for generator_name in generators_sel:
                 replicability_scores.append(replicability_ext(df_init, df_syn_dict[generator_name], generator_name))
             replicability_scores_df = pd.concat(replicability_scores, ignore_index=True)
-            replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_replicability_scores_df.csv'.format((d+1), int(eps)), index=False)
+            replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_replicability_scores_df.csv'.format((d+1), int(eps)), index=False)
 
             columns = ['time', 'censor', 'treatment']
             _, _, ci_init, _ = fit_cox_model(df_init, columns)
@@ -237,7 +237,7 @@ def run(dataset_name, generators_sel):
                                 "errors" : errors,
                                 "label" : label,
                                 "colors" : colors_})
-            err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_error_df.csv'.format((d+1), int(eps)), index=False)
+            err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_error_df.csv'.format((d+1), int(eps)), index=False)
 
             os.chdir(original_dir)
 
