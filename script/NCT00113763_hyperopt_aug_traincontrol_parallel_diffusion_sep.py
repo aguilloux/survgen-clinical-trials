@@ -25,6 +25,8 @@ print('Device :', DEVICE)
 def run(generator_name):
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
+    diffusion_var = "z_and_s"  # "z" or "z_and_s"
+    diffusion_marker = diffusion_var if diffusion_var=="z" else "z&s"
 
     current_path = os.getcwd()  # Get current working directory
     parent_path = os.path.dirname(current_path)
@@ -120,7 +122,7 @@ def run(generator_name):
         # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
         n_trials = 150
         print("{} trials for {}...".format(n_trials, generator_name))
-        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}_hyperopt_sep".format(name_config, n_trials, optuna_version_name, generator_name)
+        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}_hyperopt_sep_{}".format(name_config, n_trials, optuna_version_name, generator_name, diffusion_marker)
         best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}_hyperopt_sep.json".format(name_config, n_trials, optuna_version_name, generator_name)
         db_file = study_name + ".db"
         if os.path.exists(db_file):
@@ -176,7 +178,8 @@ def run(generator_name):
                                                                                                 diffusion=diffusion,
                                                                                                 do_prune=False,
                                                                                                 apply_rounding=True,
-                                                                                                diffusion_pre_params=diffusion_pre_params)
+                                                                                                diffusion_pre_params=diffusion_pre_params,
+                                                                                                diffusion_var=diffusion_var)
             elif HPO_version == "validation_loss":
                 best_params_HIVAE, study = generators_dict[generator_name].optuna_hyperparameter_search_HIVAE_loss(df_init_control_encoded,
                                                                                                                 miss_mask_control,
@@ -195,7 +198,8 @@ def run(generator_name):
                                                                                                                 screening_epochs=800,
                                                                                                                 n_startup_trials=20,
                                                                                                                 differential_privacy=differential_privacy,
-                                                                                                                do_prune=False)
+                                                                                                                do_prune=False,
+                                                                                                                diffusion_var=diffusion_var)
                 if diffusion:
                     # not implemented for the moment, as it is not the main focus of the paper and would require to re-run all the experiments with the diffuse version
                     raise NotImplementedError("HPO based on validation loss is not implemented yet for the diffuse version of HI-VAE.")

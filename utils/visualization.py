@@ -226,7 +226,7 @@ def print_loss(epoch, start_time, ELBO, avg_KL_s, avg_KL_z):
           % (epoch, time.time() - start_time, ELBO, avg_KL_z, avg_KL_s, ELBO + avg_KL_z + avg_KL_s))
 
 
-def visualize_general_perf(scores, metrics, title = None):
+def visualize_general_perf(scores, metrics, title = None, palette = 'colorblind'):
     """
     Generate boxplots to visualize performance scores across different generators.
 
@@ -249,7 +249,7 @@ def visualize_general_perf(scores, metrics, title = None):
             spine.set_edgecolor('black')
 
         sns.boxplot(data=scores, x='generator', y=metric_name, ax=ax,
-                    linewidth = 2, saturation = 1, palette = 'colorblind', 
+                    linewidth = 2, saturation = 1, palette = palette, 
                     width = 1, gap = 0.15, whis = 1.5, linecolor="Black")
         ax.set_xlabel('')
         ax.tick_params(axis='x', labelsize=18)
@@ -657,6 +657,16 @@ def _epsilon_from_generator(name):
     return float(m.group(1)) if m else np.nan
 
 
+def _family_from_generator(name):
+    """
+    Strip a trailing ``..._eps_<value>`` suffix to recover the generator's family
+    name, e.g. ``"HI-VAE_weibull_eps_5" -> "HI-VAE_weibull"``. Names with no such
+    suffix (non-DP baselines) are returned unchanged.
+    """
+    stripped = re.sub(r"[_\-]?eps(?:ilon)?[_\-=\s]*\d+(?:\.\d+)?$", "", str(name), flags=re.IGNORECASE)
+    return stripped or str(name)
+
+
 def _flatten_metrics(metrics):
     """
     Normalise a metric specification into a flat list of ``(metric_name, opt, group)``.
@@ -681,7 +691,7 @@ def _flatten_metrics(metrics):
 def visualize_perf_vs_privacy(scores, metrics, epsilon_map=None, ncols=2,
                               panel_size=(7.5, 5.5), fontsize=16, suptitle=None,
                               dp_label="DP generator", nondp_label="No privacy (non-DP)",
-                              show=True):
+                              palette=None, show=True):
     """
     Plot every metric against the privacy level, one panel per metric.
 
@@ -712,7 +722,16 @@ def visualize_perf_vs_privacy(scores, metrics, epsilon_map=None, ncols=2,
         panel_size (tuple): (width, height) in inches of a single panel.
         fontsize (int): base font size for the axis labels and ticks.
         suptitle (str): optional overall figure title.
-        dp_label, nondp_label (str): legend labels for the two series.
+        dp_label, nondp_label (str): legend labels for the two series. Ignored when
+            ``palette`` is given, in which case each generator family gets its own
+            legend entry instead.
+        palette: optional seaborn palette (name or list), or a
+            ``{family_name: color}`` dict, used to draw several generator families
+            (e.g. ``"HI-VAE_weibull"`` and ``"HI-VAE_piecewise"``) on the same axes,
+            one colored line per family, sharing the epsilon x-axis. The family name
+            is recovered from each ``generator`` value by stripping its trailing
+            ``_eps_<value>`` suffix. Defaults to None, which keeps the original
+            two-color (DP vs non-DP) rendering for a single generator family.
         show (bool): call ``plt.show()`` before returning.
 
     Returns:
@@ -736,28 +755,48 @@ def visualize_perf_vs_privacy(scores, metrics, epsilon_map=None, ncols=2,
                     for g in generators])
     is_dp = ~np.isnan(eps)
 
-    # x-axis = increasing privacy budget epsilon, so most private (left) -> least
-    # private (right); the non-DP baseline counts as epsilon = inf and lands last
-    order = np.argsort(np.where(is_dp, eps, np.inf))
-    generators = [generators[i] for i in order]
-    eps, is_dp = eps[order], is_dp[order]
-
-    # categorical x positions, with a visual gap isolating the non-DP baseline
-    x_pos = np.arange(len(generators), dtype=float)
-    if is_dp.any() and (~is_dp).any():
-        x_pos[~is_dp] += 0.6  # push the baseline right, set apart from the DP cluster
-    # a lone non-DP model needs no name on the axis; several of them do
-    single_baseline = (~is_dp).sum() == 1
-    x_labels = [(f"$\\epsilon$={eps_i:g}" if dp_i
-                 else ("No privacy" if single_baseline else str(gen)))
-                for gen, eps_i, dp_i in zip(generators, eps, is_dp)]
-
     # A "min"/"max" goal is shown as a direction arrow ON the y-axis (not as text).
     # The y-axis label is rotated 90° counter-clockwise, which turns a typed "↓" into
     # a visual "→"; so we type the pre-rotation glyph that lands pointing the right way
     # -- "←" renders as ↓ (min, lower is better) and "→" renders as ↑ (max, higher).
     axis_arrow = {"min": "←", "max": "→"}
     dp_color, np_color = sns.color_palette("colorblind")[0], sns.color_palette("colorblind")[3]
+
+    if palette is None:
+        # x-axis = increasing privacy budget epsilon, so most private (left) -> least
+        # private (right); the non-DP baseline counts as epsilon = inf and lands last
+        order = np.argsort(np.where(is_dp, eps, np.inf))
+        generators = [generators[i] for i in order]
+        eps, is_dp = eps[order], is_dp[order]
+
+        # categorical x positions, with a visual gap isolating the non-DP baseline
+        x_pos_all = np.arange(len(generators), dtype=float)
+        if is_dp.any() and (~is_dp).any():
+            x_pos_all[~is_dp] += 0.6  # push the baseline right, set apart from the DP cluster
+        # a lone non-DP model needs no name on the axis; several of them do
+        single_baseline = (~is_dp).sum() == 1
+        tick_pos = x_pos_all
+        tick_labels = [(f"$\\epsilon$={eps_i:g}" if dp_i
+                        else ("No privacy" if single_baseline else str(gen)))
+                       for gen, eps_i, dp_i in zip(generators, eps, is_dp)]
+        color_map = None
+    else:
+        # one colored line per generator family, sharing the epsilon x-axis so
+        # families are directly comparable at the same privacy budget
+        families = np.array([_family_from_generator(g) for g in generators])
+        family_order = list(dict.fromkeys(families))
+        color_map = palette if isinstance(palette, dict) else \
+            dict(zip(family_order, sns.color_palette(palette, len(family_order))))
+
+        dp_eps_sorted = np.array(sorted(set(eps[is_dp])))
+        eps_slot = {e: i for i, e in enumerate(dp_eps_sorted)}
+        has_baseline = (~is_dp).any()
+        baseline_x = len(dp_eps_sorted) + 0.6
+        x_pos_all = np.array([baseline_x if not dp_i else eps_slot[e]
+                              for e, dp_i in zip(eps, is_dp)])
+        tick_pos = list(range(len(dp_eps_sorted))) + ([baseline_x] if has_baseline else [])
+        tick_labels = [f"$\\epsilon$={e:g}" for e in dp_eps_sorted] + \
+            (["No privacy"] if has_baseline else [])
 
     ncols = max(1, min(ncols, len(flat_metrics)))
     nrows = int(np.ceil(len(flat_metrics) / ncols))
@@ -770,14 +809,29 @@ def visualize_perf_vs_privacy(scores, metrics, epsilon_map=None, ncols=2,
         means = means_by_gen.loc[generators, metric_name].values.astype(float)
         stds = stds_by_gen.loc[generators, metric_name].values.astype(float)
 
-        if is_dp.any():
-            ax.errorbar(x_pos[is_dp], means[is_dp], yerr=stds[is_dp],
-                        marker="o", markersize=8, capsize=4, linewidth=2,
-                        color=dp_color, label=dp_label)
-        if (~is_dp).any():
-            ax.errorbar(x_pos[~is_dp], means[~is_dp], yerr=stds[~is_dp],
-                        marker="D", markersize=10, capsize=4, linestyle="none",
-                        color=np_color, label=nondp_label)
+        if color_map is None:
+            if is_dp.any():
+                ax.errorbar(x_pos_all[is_dp], means[is_dp], yerr=stds[is_dp],
+                            marker="o", markersize=8, capsize=4, linewidth=2,
+                            color=dp_color, label=dp_label)
+            if (~is_dp).any():
+                ax.errorbar(x_pos_all[~is_dp], means[~is_dp], yerr=stds[~is_dp],
+                            marker="D", markersize=10, capsize=4, linestyle="none",
+                            color=np_color, label=nondp_label)
+        else:
+            for fam in family_order:
+                fam_dp, fam_np = (families == fam) & is_dp, (families == fam) & ~is_dp
+                color, labeled = color_map.get(fam), False
+                if fam_dp.any():
+                    ordr = np.argsort(x_pos_all[fam_dp])
+                    ax.errorbar(x_pos_all[fam_dp][ordr], means[fam_dp][ordr], yerr=stds[fam_dp][ordr],
+                                marker="o", markersize=8, capsize=4, linewidth=2,
+                                color=color, label=fam)
+                    labeled = True
+                if fam_np.any():
+                    ax.errorbar(x_pos_all[fam_np], means[fam_np], yerr=stds[fam_np],
+                                marker="D", markersize=10, capsize=4, linestyle="none",
+                                color=color, label=None if labeled else fam)
 
         # numeric target -> dotted red reference line, nothing added to the title;
         # a "min"/"max" goal -> direction arrow appended to the y-axis label
@@ -785,8 +839,8 @@ def visualize_perf_vs_privacy(scores, metrics, epsilon_map=None, ncols=2,
             ax.axhline(float(opt), ls=":", color="red", lw=2, zorder=10)
         ylabel = f"{metric_name}  {axis_arrow[opt]}" if opt in axis_arrow else metric_name
 
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(x_labels)
+        ax.set_xticks(tick_pos)
+        ax.set_xticklabels(tick_labels)
         ax.set_xlabel("Privacy budget ($\\epsilon$)", fontsize=fontsize)
         ax.set_ylabel(ylabel, fontweight="semibold", fontsize=fontsize)
         ax.tick_params(axis='both', labelsize=fontsize - 2)

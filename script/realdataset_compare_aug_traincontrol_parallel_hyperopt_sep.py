@@ -33,6 +33,9 @@ def setup_unique_working_dir(base_dir="experiments"):
 
 def run(dataset_name, generators_sel):
 
+    diffusion_var = "z_and_s"  # "z" or "z_and_s"
+    diffusion_marker = diffusion_var if diffusion_var=="z" else "z&s"
+
     list_n_samples_control = [(1/3), (2/3), 1.0]
 
     current_path = os.getcwd()  # Get current working directory
@@ -118,7 +121,7 @@ def run(dataset_name, generators_sel):
             if "diffusion" in generator_name:
                 for f in os.listdir(best_param_dir):
                     # if (f.endswith(generator_name + '_hyperopt_sep.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "Kmap_SurvDist") in f)):
-                    if (f.endswith(generator_name + '_hyperopt_sep_z&s.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "DetectXGB") in f)):
+                    if (f.endswith(generator_name + '_hyperopt_sep_{}.json'.format(diffusion_marker)) & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "DetectXGB") in f)):
                         best_param_file = f
                 with open(best_param_dir + "/" + best_param_file, "r") as f:
                     best_params_diffusion = json.load(f)
@@ -201,7 +204,7 @@ def run(dataset_name, generators_sel):
                                   columns=["Generator", "log p_value"])
             df_log_p_value_control = pd.concat([df_log_p_value_control, tmp_df])
 
-        save_res_dir = parent_path + "/dataset/" + dataset_name + "/metric_results_" + optuna_version_name
+        save_res_dir = parent_path + "/dataset/" + dataset_name + "/metric_results_" + optuna_version_name + "_{}".format(diffusion_marker)
         if not os.path.exists(save_res_dir):
             os.makedirs(save_res_dir)
 
@@ -254,7 +257,6 @@ if __name__ == "__main__":
                       "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"
                       ]
     dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
-    # dataset_id = int(sys.argv[1])
-    dataset_id = 0
+    dataset_id = int(sys.argv[1])
     dataset_name = dataset_sel[dataset_id]
     run(dataset_name , generators_sel)
