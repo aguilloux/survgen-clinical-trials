@@ -120,8 +120,8 @@ def run(generator_name):
         # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
         n_trials = 150
         print("{} trials for {}...".format(n_trials, generator_name))
-        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}_hyperopt_sep".format(name_config, n_trials, optuna_version_name, generator_name)
-        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}_hyperopt_sep.json".format(name_config, n_trials, optuna_version_name, generator_name)
+        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}_hyperopt_sep_z&s".format(name_config, n_trials, optuna_version_name, generator_name)
+        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}_hyperopt_sep_z&s.json".format(name_config, n_trials, optuna_version_name, generator_name)
         db_file = study_name + ".db"
         if os.path.exists(db_file):
             print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))
@@ -176,7 +176,8 @@ def run(generator_name):
                                                                                                 diffusion=diffusion,
                                                                                                 do_prune=False,
                                                                                                 apply_rounding=True,
-                                                                                                diffusion_pre_params=diffusion_pre_params)
+                                                                                                diffusion_pre_params=diffusion_pre_params,
+                                                                                                diffusion_var="z_and_s")
             elif HPO_version == "validation_loss":
                 best_params_HIVAE, study = generators_dict[generator_name].optuna_hyperparameter_search_HIVAE_loss(df_init_control_encoded,
                                                                                                                 miss_mask_control,
