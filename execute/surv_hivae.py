@@ -389,11 +389,11 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
                 if diffusion_var == "z":
                     vae_res = vae_model.diffusion_forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
                                                     **diffusion_kwargs)
-                elif diffusion_var == "y":
-                    vae_res = vae_model.diffusion_forward_y(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
+                elif diffusion_var == "z_and_s":
+                    vae_res = vae_model.diffusion_forward_conditional(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset,
                                                     **diffusion_kwargs)
                 else:
-                    raise ValueError(f"Invalid diffusion_var: {diffusion_var}. Must be 'z' or 'y'.")
+                    raise ValueError(f"Invalid diffusion_var: {diffusion_var}. Must be 'z' or 'z_and_s'.")
             else:
                 vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
             samples_list.append(vae_res["samples"])
@@ -859,6 +859,9 @@ def optuna_hyperparameter_search(df, miss_mask, true_miss_mask, feat_types_dict,
             params["s_dim"] = diffusion_pre_params["s_dim"]
             params["batch_size"] = diffusion_pre_params["batch_size"]
             params["lr"] = diffusion_pre_params["lr"]
+            if "HI-VAE_piecewise" in generator_name:
+                params["n_intervals"] = diffusion_pre_params["n_intervals"]
+                params["n_layers_surv_piecewise"] = diffusion_pre_params["n_layers_surv_piecewise"]
             max_grad_norm = 10.
 
         # When tune_epsilon is on, the sampled "target_epsilon" overrides the

@@ -117,7 +117,8 @@ def run(dataset_name, generators_sel):
             # best_param_file = [item for item in best_param_files if generator_name in item][0]
             if "diffusion" in generator_name:
                 for f in os.listdir(best_param_dir):
-                    if (f.endswith(generator_name + '_hyperopt_sep.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "Kmap_SurvDist") in f)):
+                    # if (f.endswith(generator_name + '_hyperopt_sep.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "Kmap_SurvDist") in f)):
+                    if (f.endswith(generator_name + '_hyperopt_sep_z&s.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}".format((d+1), n_trials, "DetectXGB") in f)):
                         best_param_file = f
                 with open(best_param_dir + "/" + best_param_file, "r") as f:
                     best_params_diffusion = json.load(f)
@@ -166,7 +167,8 @@ def run(dataset_name, generators_sel):
                                                                                             gen_from_prior=gen_from_prior,
                                                                                             n_generated_sample=n_generated_samples_control,
                                                                                             diffusion=diffusion,
-                                                                                            apply_rounding=True)
+                                                                                            apply_rounding=True,
+                                                                                            diffusion_var="z_and_s")
             else:
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                                             target_column="censor",
@@ -247,8 +249,10 @@ def run(dataset_name, generators_sel):
 
 
 if __name__ == "__main__":
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
-                      "Surv-GAN", "Surv-VAE", "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+    generators_sel = [
+                    # "HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", 
+                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"
+                      ]
     dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
     # dataset_id = int(sys.argv[1])
     dataset_id = 0
