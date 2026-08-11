@@ -122,7 +122,7 @@ def run(dataset_name, generators_sel):
             for generator_name in generators_sel:
                 # best_param_file = [item for item in best_param_files if generator_name in item][0]
                 for f in os.listdir(best_param_dir):
-                    if (f.endswith(generator_name + '.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}_DP_eps{}".format((d+1), n_trials, optuna_version_name, int(eps)) in f)):
+                    if (f.endswith('.json') & ("traincontrol_" + name_config + "_aug_Ncontrol{}%3_ntrials{}_{}_DP_eps{}".format((d+1), n_trials, optuna_version_name, int(eps)) in f)):
                         best_param_file = f
                 with open(best_param_dir + "/" + best_param_file, "r") as f:
                     best_params_dict[generator_name] = json.load(f)
