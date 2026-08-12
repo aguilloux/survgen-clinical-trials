@@ -51,6 +51,7 @@ def run(dataset_name, generators_sel):
     print("Original directory:", original_dir)
 
     for d, perc_control in enumerate(list_n_samples_control):
+        d = 2
         print("Control group percentage:", perc_control)
         for eps in list_epsilon:
             print("Epsilon:", eps)
@@ -199,18 +200,18 @@ def run(dataset_name, generators_sel):
             if not os.path.exists(save_res_dir):
                 os.makedirs(save_res_dir)
 
-            df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_p_value_df.csv'.format((d+1), int(eps)), index=False)
+            df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_p_value_df.csv'.format((d+1), int(eps)), index=False)
             general_scores = []
             for generator_name in generators_sel:
                 general_scores.append(general_metrics(df_init_control, df_gen_control_dict[generator_name], generator_name))
             general_scores_df = pd.concat(general_scores)
-            general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_general_scores_df.csv'.format((d+1), int(eps)), index=False)
+            general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_general_scores_df.csv'.format((d+1), int(eps)), index=False)
 
             replicability_scores = []
             for generator_name in generators_sel:
                 replicability_scores.append(replicability_ext(df_init, df_syn_dict[generator_name], generator_name))
             replicability_scores_df = pd.concat(replicability_scores, ignore_index=True)
-            replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_replicability_scores_df.csv'.format((d+1), int(eps)), index=False)
+            replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_replicability_scores_df.csv'.format((d+1), int(eps)), index=False)
 
             columns = ['time', 'censor', 'treatment']
             _, _, ci_init, _ = fit_cox_model(df_init, columns)
@@ -237,7 +238,7 @@ def run(dataset_name, generators_sel):
                                 "errors" : errors,
                                 "label" : label,
                                 "colors" : colors_})
-            err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol3%3_eps{}_error_df.csv'.format((d+1), int(eps)), index=False)
+            err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_eps{}_error_df.csv'.format((d+1), int(eps)), index=False)
 
             os.chdir(original_dir)
 
