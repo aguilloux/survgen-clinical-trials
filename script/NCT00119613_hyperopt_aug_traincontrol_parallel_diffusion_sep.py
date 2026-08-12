@@ -25,7 +25,7 @@ print('Device :', DEVICE)
 def run(generator_name):
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
-    diffusion_var = "z_and_s"  # "z" or "z_and_s"
+    diffusion_var = "z"  # "z" or "z_and_s"
     diffusion_marker = diffusion_var if diffusion_var=="z" else "z&s"
 
     current_path = os.getcwd()  # Get current working directory
