@@ -25,7 +25,7 @@ print('Device :', DEVICE)
 def run(generator_name):
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
-    diffusion_var = "z_and_s"  # "z" or "z_and_s"
+    diffusion_var = "z"  # "z" or "z_and_s"
     diffusion_marker = diffusion_var if diffusion_var=="z" else "z&s"
 
     current_path = os.getcwd()  # Get current working directory
@@ -123,7 +123,7 @@ def run(generator_name):
         n_trials = 150
         print("{} trials for {}...".format(n_trials, generator_name))
         study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}_hyperopt_sep_{}".format(name_config, n_trials, optuna_version_name, generator_name, diffusion_marker)
-        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}_hyperopt_sep.json".format(name_config, n_trials, optuna_version_name, generator_name)
+        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}_hyperopt_sep_{}.json".format(name_config, n_trials, optuna_version_name, generator_name)
         db_file = study_name + ".db"
         if os.path.exists(db_file):
             print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))
