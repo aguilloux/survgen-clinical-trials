@@ -171,7 +171,7 @@ def run(dataset_name, generators_sel):
                                                                                             n_generated_sample=n_generated_samples_control,
                                                                                             diffusion=diffusion,
                                                                                             apply_rounding=True,
-                                                                                            diffusion_var="z_and_s")
+                                                                                            diffusion_var=diffusion_var)
             else:
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                                             target_column="censor",
