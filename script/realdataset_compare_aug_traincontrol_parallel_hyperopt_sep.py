@@ -33,7 +33,7 @@ def setup_unique_working_dir(base_dir="experiments"):
 
 def run(dataset_name, generators_sel):
 
-    diffusion_var = "z_and_s"  # "z" or "z_and_s"
+    diffusion_var = "z"  # "z" or "z_and_s"
     diffusion_marker = diffusion_var if diffusion_var=="z" else "z&s"
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
