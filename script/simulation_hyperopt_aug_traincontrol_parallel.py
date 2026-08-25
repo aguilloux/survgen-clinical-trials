@@ -24,7 +24,7 @@ print('Device :', DEVICE)
 
 def run(generator_name):
 
-    n_samples = 600
+    n_samples = 300
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -128,7 +128,7 @@ def run(generator_name):
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
-        name_config = "sim_yDiff_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, int(perc_control*3+0.01), n_features_bytype, int(treatment_effect))
+        name_config = "simu_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, int(perc_control*3+0.01), n_features_bytype, int(treatment_effect))
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
@@ -203,7 +203,7 @@ def run(generator_name):
                                                                                                 differential_privacy=differential_privacy, 
                                                                                                 diffusion=diffusion, 
                                                                                                 do_prune=False,
-                                                                                                diffusion_var="y")
+                                                                                                diffusion_var="z")
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study
             with open(best_params_file, "w") as f:
@@ -243,12 +243,13 @@ def setup_unique_working_dir(base_dir="experiments"):
   
 
 if __name__ == "__main__":
-    # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
-    #                   "Surv-GAN", "Surv-VAE", 
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
+                      "Surv-GAN", "Surv-VAE", 
     #                   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
     #                   "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP",
     #                   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion", 
-    #                   "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"]
-    generators_sel = ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+    #                   "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"
+                    ]
+    # generators_sel = ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     generator_id = int(sys.argv[1])
     run(generators_sel[generator_id])
