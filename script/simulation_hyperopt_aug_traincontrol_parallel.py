@@ -24,7 +24,7 @@ print('Device :', DEVICE)
 
 def run(generator_name):
 
-    n_samples = 1200
+    n_samples = 300
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
