@@ -19,6 +19,16 @@ import torch
 import multiprocessing as mp
 mp.set_start_method("spawn", force=True)
 
+def _build_resample_indices(n_source, n_target):
+    """
+    Return a LongTensor of length n_target indexing into a source of length n_source.
+    Uses every source row (possibly more than once) rather than dropping rows,
+    since row i must stay aligned with its own covariates when used as a cond.
+    """
+    if n_target <= n_source:
+        return torch.randperm(n_source)[:n_target]
+    return torch.cat((torch.arange(0, n_source), torch.randint(0, n_source, (n_target - n_source,))))
+
 def run_worker(return_dict, model, params, data, count, cond, n_generated_dataset, cond_gen):
     # print("training....")
     model_trial = model(**params)
@@ -82,7 +92,7 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         est_data_gen_transformed_survgan_list = []
         for n_generated_sample_ in n_generated_sample:
             if cond_gen is None:
-                indices = torch.cat((torch.arange(0, data.shape[0]), torch.randint(0, data.shape[0], (n_generated_sample_ - data.shape[0],))))
+                indices = _build_resample_indices(data.shape[0], n_generated_sample_)
                 cond_gen = SurvivalAnalysisDataLoader(df.loc[indices], target_column=target_column, time_to_event_column=time_to_event_column)[[target_column]]
             est_data_gen_transformed_survgan = []
             for j in range(n_generated_dataset):
@@ -98,7 +108,7 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         if cond_gen is None:
             if n_generated_sample is None:
                 n_generated_sample = data.shape[0]
-            indices = torch.cat((torch.arange(0, data.shape[0]), torch.randint(0, data.shape[0], (n_generated_sample - data.shape[0],))))
+            indices = _build_resample_indices(data.shape[0], n_generated_sample)
             cond_gen = SurvivalAnalysisDataLoader(df.loc[indices], target_column=target_column, time_to_event_column=time_to_event_column)[[target_column]]
         else:
             n_generated_sample = cond_gen.shape[0]
@@ -172,7 +182,7 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
             if method == 'train_full_gen_full':
                 if cond_generation is None:
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
-                    indices = torch.cat((torch.arange(0, data.shape[0]), torch.randint(0, data.shape[0], (max(0, n_gen_sample - data.shape[0]),))))
+                    indices = _build_resample_indices(data.shape[0], n_gen_sample)
                     # cond = SurvivalAnalysisDataLoader(df.loc[indices], target_column=target_column, time_to_event_column=time_to_event_column)[[target_column]]
                     cond_gen = df.loc[indices][[target_column]]
                     cond = df[[target_column]]
