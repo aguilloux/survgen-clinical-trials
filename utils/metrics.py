@@ -288,7 +288,8 @@ def nndr(data_real, data_syn, columns=None, categorical=None, percentile=5, eps=
         f"p{percentile}": float(np.percentile(scores, percentile)),
     }
 
-def general_metrics(data_init, data_gen, generator, include_nndr=True):
+def general_metrics(data_init, data_gen, generator, include_nndr=True, 
+                    include_tableone_min_p_value=True, categorical=None, continuous=None, nonnormal=None):
     """
     Compute a set of general quality metrics to assess synthetic survival data.
 
@@ -303,13 +304,6 @@ def general_metrics(data_init, data_gen, generator, include_nndr=True):
     """
 
     synthcity_dataloader_init = SurvivalAnalysisDataLoader(data_init, target_column = "censor", time_to_event_column = "time")
-    metrics = {
-        'sanity': ['nearest_syn_neighbor_distance'],
-        'stats': ['jensenshannon_dist', 'ks_test', 'survival_km_distance'],
-        'performance': ['feat_rank_distance'],
-        'detection': ['detection_xgb'],
-        'privacy': ['k-map', 'distinct l-diversity', 'identifiability_score']
-    }
 
     # Define expected metrics and readable names
     expected_metrics = {
@@ -322,20 +316,22 @@ def general_metrics(data_init, data_gen, generator, include_nndr=True):
         "privacy.identifiability_score.score": "Identifiability score"
     }
 
+    if include_tableone_min_p_value:
+        if (categorical is None) or (continuous is None):
+            raise ValueError(
+                "include_tableone_min_p_value=True requires both `categorical` and "
+                "`continuous` to be provided (lists of column names for TableOne)."
+            )
+        # data_init is the reference frame for every generated dataset; tag it once.
+        df_init_tableone = data_init.copy()
+        df_init_tableone["sample"] = 1
+
     scores = []
     for idx, generated_data in enumerate(data_gen):
         enable_reproducible_results(idx)
         clear_cache()
 
         synthcity_dataloader_syn = SurvivalAnalysisDataLoader(generated_data, target_column = "censor", time_to_event_column = "time")
-
-        # evaluation = Metrics().evaluate(X_gt=synthcity_dataloader_init, # can be dataloaders or dataframes
-        #                                 X_syn=synthcity_dataloader_syn, 
-        #                                 reduction='mean', # default mean
-        #                                 n_histogram_bins=10, # default 10
-        #                                 metrics=None, # all metrics
-        #                                 task_type='survival_analysis', 
-        #                                 use_cache=True)
         
         evaluation = Metrics().evaluate(X_gt=synthcity_dataloader_init, # can be dataloaders or dataframes
                                         X_syn=synthcity_dataloader_syn, 
@@ -369,6 +365,20 @@ def general_metrics(data_init, data_gen, generator, include_nndr=True):
             values.append(val)
         if include_nndr:
             values.append(nndr(data_init, generated_data)["mean"])
+        if include_tableone_min_p_value:
+            # Tag the synthetic frame and compare it against the real one with TableOne,
+            # grouping on `sample` (1 = real, 0 = synthetic). The smallest p-value across
+            # all variable tests (incl. the survival log-rank) is the hardest-to-pass test.
+            df_gen_tableone = generated_data.copy()
+            df_gen_tableone["sample"] = 0
+            _, min_p_value, _, _ = tableone_tests(
+                pd.concat([df_init_tableone, df_gen_tableone], ignore_index=True),
+                groupby="sample",
+                categorical=categorical,
+                continuous=continuous,
+                nonnormal=nonnormal,
+            )
+            values.append(min_p_value)
         # print("values: ", values)
         scores.append(values)
 
@@ -376,6 +386,8 @@ def general_metrics(data_init, data_gen, generator, include_nndr=True):
                "Detection XGB", "NSND", "K-map score", "Identifiability score"]
     if include_nndr:
         columns = columns + ["NNDR"]
+    if include_tableone_min_p_value:
+        columns = columns + ["TableOne min p-value"]
     score_df = pd.DataFrame(scores, columns=columns)
     score_df["generator"] = generator
 
