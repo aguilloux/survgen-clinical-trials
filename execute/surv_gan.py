@@ -172,7 +172,7 @@ def optuna_hyperparameter_search(data, columns, target_column, time_to_event_col
             if method == 'train_full_gen_full':
                 if cond_generation is None:
                     n_gen_sample = n_generated_sample if n_generated_sample is not None else data.shape[0]
-                    indices = torch.cat((torch.arange(0, data.shape[0]), torch.randint(0, data.shape[0], (n_gen_sample - data.shape[0],))))
+                    indices = torch.cat((torch.arange(0, data.shape[0]), torch.randint(0, data.shape[0], (max(0, n_gen_sample - data.shape[0]),))))
                     # cond = SurvivalAnalysisDataLoader(df.loc[indices], target_column=target_column, time_to_event_column=time_to_event_column)[[target_column]]
                     cond_gen = df.loc[indices][[target_column]]
                     cond = df[[target_column]]
