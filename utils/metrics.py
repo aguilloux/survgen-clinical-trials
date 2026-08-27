@@ -835,7 +835,10 @@ def replicability(data_init, data_syn, generator):
     results = [fit_cox_model(data, columns) for data in data_syn]
     coef_syn, _, _, se_syn = zip(*results)
     max_len_samples = len(data_syn)
-    list_len_samples = np.arange(int(.2 * max_len_samples), max_len_samples, int(.2 * max_len_samples)).tolist()
+    # ~20%-spaced checkpoints, always including at least one (the 20% step is 0
+    # -- and np.arange would divide by it -- whenever max_len_samples < 5).
+    step = max(int(.2 * max_len_samples), 1)
+    list_len_samples = np.arange(step, max_len_samples, step).tolist()
     if max_len_samples not in list_len_samples:
         list_len_samples += [max_len_samples]
     score_df = pd.DataFrame(columns=["Generator", "Nb generated datasets", "Estimate agreement", "Decision agreement", "Standardized difference", "CI overlap"])
@@ -865,7 +868,10 @@ def replicability_ext(data_init, data_syn, generator):
     results = [fit_cox_model(data, columns) for data in data_syn]
     coef_syn, _, _, se_syn = zip(*results)
     max_len_samples = len(data_syn)
-    list_len_samples = np.arange(int(.2 * max_len_samples), max_len_samples, int(.2 * max_len_samples)).tolist()
+    # ~20%-spaced checkpoints, always including at least one (the 20% step is 0
+    # -- and np.arange would divide by it -- whenever max_len_samples < 5).
+    step = max(int(.2 * max_len_samples), 1)
+    list_len_samples = np.arange(step, max_len_samples, step).tolist()
     if max_len_samples not in list_len_samples:
         list_len_samples += [max_len_samples]
     score_df = pd.DataFrame(columns=["Generator", "Nb generated datasets", "Estimate agreement", "Decision agreement", "Standardized difference", "CI overlap"])

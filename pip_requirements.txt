@@ -184,6 +184,9 @@ statsmodels==0.14.6
 sympy==1.13.1
 synthcity==0.2.12
 tableone==0.9.1
+tabpfn==8.4.0
+tabpfn-common-utils==0.2.23
+tabpfn-extensions==0.6.0
 tabulate==0.10.0
 tenacity==9.1.4
 tensorboard==2.20.0
