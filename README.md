@@ -50,7 +50,7 @@ Each dataset (real or simulated) should have its own folder and contain the foll
 
 The repository is organized as follows:
 
-* **execute/** – Scripts to **train, generate data, and optimize hyperparameters** for each model: `surv-GAN`, `surv-VAE`, `HI-VAE_piecewise`, `HI-VAE_weibull`.  
+* **execute/** – Scripts to **train, generate data, and optimize hyperparameters** for each model: `surv-GAN`, `surv-VAE`, `HI-VAE_piecewise`, `HI-VAE_weibull`, `TabPFN` (naive / uncensoring modes).  
 * **preprocessing/*.ipynb** – Notebooks for **preprocessing real datasets**. Can generate required `data.csv`, `data_types.csv`, and `Missingxx_y.csv` files dor real datasets.  
 * **script/** – Scripts defining experiments (hyperparameter optimization, Monte Carlo experiments, type I error and power estimation, etc.).  
 * **batch/** – Batch files to **run simulations and experiments** defined in the `script/` folder. Useful for automated or parallel execution on servers.
@@ -72,6 +72,8 @@ conda activate hivae
 pip install synthcity
 pip install -r pip_requirements.txt
 ```
+
+> **TabPFN note:** The `TabPFN` generator (`execute/surv_tabpfn.py`) uses [Prior Labs'](https://priorlabs.ai) local TabPFN backend, which requires a one-time license acceptance tied to a free Prior Labs account before its pretrained weights can be downloaded from Hugging Face Hub. Register and accept the license at [ux.priorlabs.ai](https://ux.priorlabs.ai), then either `export TABPFN_TOKEN="<your-api-key>"` or save the key to `~/.cache/tabpfn/auth_token`. Model weights are downloaded once on first use and cached locally afterward (no further network access required). Given this repo processes real patient-level clinical trial data, review Prior Labs' data-handling terms before pointing the local backend at anything beyond simulated data.
 
 ---
 

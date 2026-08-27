@@ -24,7 +24,7 @@ print('Device :', DEVICE)
 
 def run(generator_name):
 
-    n_samples = 300
+    n_samples = 1200
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -197,7 +197,7 @@ def run(generator_name):
                                                                                                 target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
                                                                                                 target_delta=1e-5,
                                                                                                 tune_params=None, # if None, the function will use the default hyperparameters to tune,
-                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": treated.shape[0]}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                fixed_params={"epochs": 4000, "n_samples_gen": treated.shape[0]}, # these parameters will be fixed to the specified value and not tuned,
                                                                                                 norm_mode="global",
                                                                                                 screening_epochs=800,
                                                                                                 n_startup_trials=20,
