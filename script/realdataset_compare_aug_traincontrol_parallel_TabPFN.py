@@ -147,10 +147,10 @@ def run(dataset_name, generators_sel):
         for generator_name in generators_sel:
             print("=" * 100)
             print("Generate data by " + generator_name)
-            best_params = best_params_dict[generator_name]
             if generator_name in ["HI-VAE_weibull", "HI-VAE_piecewise",
                                   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
                                   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
+                best_params = best_params_dict[generator_name]
                 feat_types_dict_ext = feat_types_dict.copy()
                 for i in range(len(feat_types_dict)):
                     if feat_types_dict_ext[i]['name'] == "survcens":
@@ -162,9 +162,6 @@ def run(dataset_name, generators_sel):
                     gen_from_prior = True
                 else:
                     gen_from_prior = False
-            if generator_name in ["HI-VAE_weibull", "HI-VAE_piecewise",
-                                  "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
-                                  "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
                 diffusion = False
                 if generator_name in ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]:
                     diffusion = True
@@ -186,6 +183,7 @@ def run(dataset_name, generators_sel):
                                                                         apply_rounding=True, mode=TABPFN_MODES[generator_name])
                                 
             else:
+                best_params = best_params_dict[generator_name]
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                                             target_column="censor",
                                                                                             time_to_event_column="time", 
