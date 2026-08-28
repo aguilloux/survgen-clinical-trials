@@ -6,8 +6,8 @@
 #SBATCH --mem=24G                       # Memory allocation, adjust based on your usage
 #SBATCH --time=2-00:00:00               # Adjust the time limit as needed (10 hours here)
 #SBATCH --array=0-3                     # one task per dataset
-#SBATCH --output=logs/realdataset_sep_aug_traincontrol_compare_%A_%a.out     # Output file named after job and ID
-#SBATCH --error=logs/realdataset_sep_aug_traincontrol_compare_%A_%a.err
+#SBATCH --output=logs/real_TabPFN_aug_traincontrol_compare_%A_%a.out     # Output file named after job and ID
+#SBATCH --error=logs/real_TabPFN_aug_traincontrol_compare_%A_%a.err
 
 echo "### Starting GPU job: $SLURM_JOB_NAME ###"
 cd ${SLURM_SUBMIT_DIR}
