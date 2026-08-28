@@ -24,7 +24,7 @@ print('Device :', DEVICE)
 
 def run(generator_name, target_epsilon):
 
-    n_samples = 600
+    n_samples = 300
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -135,13 +135,6 @@ def run(generator_name, target_epsilon):
 
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
-                        "HI-VAE_lognormal" : surv_hivae,
-                        "Surv-GAN" : surv_gan,
-                        "Surv-VAE" : surv_vae, 
-                        "HI-VAE_weibull_prior" : surv_hivae, 
-                        "HI-VAE_piecewise_prior" : surv_hivae,
-                        "HI-VAE_weibull_diffusion": surv_hivae, 
-                        "HI-VAE_piecewise_diffusion": surv_hivae,
                         }
         
         # Create directories for optuna results
@@ -182,8 +175,8 @@ def run(generator_name, target_epsilon):
                         feat_types_dict_ext[i]["type"] = 'surv'
                     else:
                         feat_types_dict_ext[i]["type"] = 'surv_piecewise'
-            gen_from_prior = "_prior" in generator_name
-            diffusion = "_diffusion" in generator_name
+            # gen_from_prior = "_prior" in generator_name
+            # diffusion = "_diffusion" in generator_name
             best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(df_init_control_encoded,
                                                                                                 miss_mask_control, 
                                                                                                 true_miss_mask_control,
@@ -196,7 +189,7 @@ def run(generator_name, target_epsilon):
                                                                                                 metric=metric_optuna,
                                                                                                 study_name=study_name, 
                                                                                                 method=method_hyperopt, 
-                                                                                                gen_from_prior=gen_from_prior,
+                                                                                                # gen_from_prior=gen_from_prior,
                                                                                                 seed=seed_optuna,
                                                                                                 target_epsilon=float(target_epsilon), # None if not DP, otherwise the target epsilon for the DP generators
                                                                                                 target_delta=1e-5,
@@ -204,7 +197,7 @@ def run(generator_name, target_epsilon):
                                                                                                 fixed_params=dict_optimal_fix_params, # these parameters will be fixed to the specified value and not tuned,
                                                                                                 norm_mode="global",
                                                                                                 differential_privacy=differential_privacy, 
-                                                                                                diffusion=diffusion, 
+                                                                                                # diffusion=diffusion, 
                                                                                                 do_prune=False)
             best_params_dict[generator_name] = best_params
             study_dict[generator_name] = study

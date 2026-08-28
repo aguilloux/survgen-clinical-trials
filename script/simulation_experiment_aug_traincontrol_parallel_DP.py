@@ -268,20 +268,19 @@ def run(MC_id):
                 for generator_name in generators_sel:
                     best_params = best_params_dict[generator_name]
                     if "HI-VAE" in generator_name:
-                        best_params["epochs"] = 5000
-                        best_params["max_grad_norm"] = 1.0
-                        gen_from_prior = "_prior" in generator_name
+                        # gen_from_prior = "_prior" in generator_name
+                        # diffusion = "_diffusion" in generator_name
                         # differential_privacy = "_DP" in generator_name
                         differential_privacy = True
-                        diffusion = "_diffusion" in generator_name
                         feat_types_dict_ext = adjust_feat_types_for_generator(generator_name, feat_types_dict)
                         data_gen_control = generators_dict[generator_name].run(df_init_control_encoded, miss_mask_control, 
                                                                             true_miss_mask_control, feat_types_dict_ext, 
                                                                             n_generated_dataset, params=best_params, 
-                                                                            gen_from_prior=gen_from_prior, norm_mode="global",
+                                                                            # gen_from_prior=gen_from_prior, 
+                                                                            norm_mode="global",
                                                                             n_generated_sample=max(treated.shape[0], control.shape[0]),
                                                                             differential_privacy=differential_privacy,
-                                                                            diffusion=diffusion,
+                                                                            # diffusion=diffusion,
                                                                             target_epsilon=eps)
                     else:
                         data_gen_control = generators_dict[generator_name].run(data_init_control, columns=fnames, 
@@ -405,7 +404,7 @@ def run(MC_id):
 
     MC_init = MC_id * n_MC_exp + 1
     MC_final = (MC_id + 1) * n_MC_exp
-    results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_DP_bestHP_3%3_{metric_optuna[0]}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
+    results.to_csv(f"{parent_path}/dataset/{dataset_name}/results_listDP_3%3_{metric_optuna[0]}_n_samples_{n_samples}_n_features_bytype_{n_features_bytype}_MC_{MC_init}to{MC_final}.csv")
 
     # tout à la fin de run(), après le to_csv
     os.chdir(original_dir)
