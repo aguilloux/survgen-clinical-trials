@@ -262,6 +262,9 @@ def run(MC_id):
                 df_init_control = pd.DataFrame(data_init_control.numpy(), columns=fnames)
                 df_init_control["treatment"] = 0
 
+                continuous_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['pos', 'real']]
+                categorical_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['cat']]
+                
 
                 df_gen_control_dict ={}
                 # For each generator, perform the data generation with the best params
@@ -302,7 +305,11 @@ def run(MC_id):
                     # synthcity_metrics_res_dict[generator_name] = pd.concat([synthcity_metrics_res_dict[generator_name], 
                     #                                                         synthcity_metrics_res_ext])
                 
-                    synthcity_metrics_res = general_metrics(df_init_control, list_df_gen_control, generator_name)[synthcity_metrics_sel]
+                    synthcity_metrics_res = general_metrics(df_init_control, list_df_gen_control, generator_name,
+                                                            include_nndr=True, include_tableone_min_p_value=True, 
+                                                            categorical=categorical_variables_control, 
+                                                            continuous=continuous_variables_control, 
+                                                            nonnormal=continuous_variables_control)[synthcity_metrics_sel]
                     for _ in np.arange(len(treat_effects)):
                         synthcity_metrics_res_dict[generator_name] = pd.concat([synthcity_metrics_res_dict[generator_name], synthcity_metrics_res])
                     
