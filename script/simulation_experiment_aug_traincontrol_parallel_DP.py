@@ -100,7 +100,7 @@ def setup_unique_working_dir(base_dir=None):
 def run(MC_id):
 
     # Simulation parameters
-    n_samples = 300
+    n_samples = 1200
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
