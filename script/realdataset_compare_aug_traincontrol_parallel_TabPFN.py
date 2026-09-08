@@ -31,14 +31,27 @@ def setup_unique_working_dir(base_dir="experiments"):
     os.makedirs(work_dir, exist_ok=True)
     return original_dir, work_dir  # Return the original dir
 
-def run(dataset_name, generators_sel):
+def run(dataset_name, generators_sel, gen_id=None):
+
+    # 2D SLURM array: when `gen_id` is set this job handles a single generator and
+    # writes per-generator metric files (suffixed with `file_tag`). Recombine them
+    # afterwards with `script/merge_TabPFN_results.py`. `color_index` keeps the
+    # per-generator colour in `error_df` stable regardless of how the work is split.
+    color_index = {g: i for i, g in enumerate(generators_sel)}
+    if gen_id is not None:
+        generators_sel = [generators_sel[gen_id]]
+        file_tag = "_" + generators_sel[0].replace("/", "-")
+    else:
+        file_tag = ""
 
     diffusion_var = "z"  # "z" or "z_and_s"
     diffusion_marker = diffusion_var if diffusion_var=="z" else "z&s"
     TABPFN_MODES = {
-            "TabPFN-naive": "naive",
-            "TabPFN-uncensoring": "uncensoring",
-            "TabPFN-survival_function": "survival_function",
+            "TabPFN-naive": {"mode": "naive"},
+            "TabPFN-survival_function-random": {"mode": "survival_function", "censoring_strategy": "random", "tte_model": "survival_function_regression"},
+            "TabPFN-survival_function-covariate_dependent": {"mode": "survival_function", "censoring_strategy": "covariate_dependent", "tte_model": "survival_function_regression"},
+            "TabPFN-survival_function-joint": {"mode": "survival_function", "censoring_strategy": "joint", "tte_model": "survival_function_regression"},
+            "TabPFN-survivalPFN": {"mode": "survival_function", "censoring_strategy": "competing_times", "tte_model": "survivalpfn"},
         }
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
@@ -92,8 +105,9 @@ def run(dataset_name, generators_sel):
         save_gen_data_dir = parent_path + "/dataset/" + dataset_name + "/generated_datasets/"
         if not os.path.exists(save_gen_data_dir):
             os.makedirs(save_gen_data_dir)
-        df_init_treated.to_csv(save_gen_data_dir + "df_init_treated"  + "_aug_Ncontrol{}%3".format((d+1)) + ".csv", index=False)
-        df_init_control.to_csv(save_gen_data_dir + "df_init_control" + "_aug_Ncontrol{}%3".format((d+1)) + ".csv", index=False)
+        if gen_id in (None, 0):  # generator-independent artefact: write it once
+            df_init_treated.to_csv(save_gen_data_dir + "df_init_treated"  + "_aug_Ncontrol{}%3".format((d+1)) + ".csv", index=False)
+            df_init_control.to_csv(save_gen_data_dir + "df_init_control" + "_aug_Ncontrol{}%3".format((d+1)) + ".csv", index=False)
 
 
         # Update the data
@@ -112,13 +126,18 @@ def run(dataset_name, generators_sel):
         n_trials = 150
         params_tabpfn = {"t": 1.0, "n_permutations": 3}
 
-        generators_dict = {"HI-VAE_weibull" : surv_hivae,
-                        "HI-VAE_piecewise" : surv_hivae,
-                        "HI-VAE_lognormal" : surv_hivae,
-                        "Surv-GAN" : surv_gan,
-                        "Surv-VAE" : surv_vae, 
-                        "TabPFN-naive" : surv_tabpfn, 
-                        "TabPFN-survival_function" : surv_tabpfn, }
+        generators_dict = {
+            "HI-VAE_weibull" : surv_hivae,
+            "HI-VAE_piecewise" : surv_hivae,
+            "HI-VAE_lognormal" : surv_hivae,
+            "Surv-GAN" : surv_gan,
+            "Surv-VAE" : surv_vae, 
+            "TabPFN-naive" : surv_tabpfn, 
+            "TabPFN-survival_function-random" : surv_tabpfn, 
+            "TabPFN-survival_function-covariate_dependent" : surv_tabpfn,
+            "TabPFN-survival_function-joint" : surv_tabpfn,
+            "TabPFN-survivalPFN" : surv_tabpfn,
+        }
         
         # Set a unique working directory for this job
         best_param_dir = parent_path + "/dataset/" + dataset_name + "/optuna_results"
@@ -178,12 +197,16 @@ def run(dataset_name, generators_sel):
                                                                                             apply_rounding=True,
                                                                                             diffusion_var=diffusion_var)
             elif "TabPFN" in generator_name:
+                params = dict(params_tabpfn)  # don't mutate the shared template
+                if "naive" not in TABPFN_MODES[generator_name]["mode"]:
+                    params["censoring_strategy"] = TABPFN_MODES[generator_name]["censoring_strategy"]
+                    params["tte_model"] = TABPFN_MODES[generator_name]["tte_model"]
                 data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                         target_column="censor", time_to_event_column="time",
                                                                         n_generated_dataset=n_generated_dataset, 
                                                                         n_generated_sample=n_generated_samples_control, 
-                                                                        params=params_tabpfn, feat_types_dict=feat_types_dict, 
-                                                                        apply_rounding=True, mode=TABPFN_MODES[generator_name])
+                                                                        params=params, feat_types_dict=feat_types_dict, 
+                                                                        apply_rounding=True, mode=TABPFN_MODES[generator_name]["mode"])
                                 
             else:
                 best_params = best_params_dict[generator_name]
@@ -222,7 +245,7 @@ def run(dataset_name, generators_sel):
         if not os.path.exists(save_res_dir):
             os.makedirs(save_res_dir)
 
-        df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_p_value_df_ext.csv'.format((d+1)), index=False)
+        df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_p_value_df_ext{}.csv'.format((d+1), file_tag), index=False)
         general_scores = []
         for generator_name in generators_sel:
             general_scores.append(general_metrics(df_init_control, df_gen_control_dict[generator_name], generator_name,
@@ -231,13 +254,13 @@ def run(dataset_name, generators_sel):
                                                   continuous=continuous_variables_control, 
                                                   nonnormal=continuous_variables_control))
         general_scores_df = pd.concat(general_scores)
-        general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_general_scores_df_ext.csv'.format((d+1)), index=False)
+        general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_general_scores_df_ext{}.csv'.format((d+1), file_tag), index=False)
 
         replicability_scores = []
         for generator_name in generators_sel:
             replicability_scores.append(replicability_ext(df_init, df_syn_dict[generator_name], generator_name))
         replicability_scores_df = pd.concat(replicability_scores, ignore_index=True)
-        replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_replicability_scores_df_ext.csv'.format((d+1)), index=False)
+        replicability_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_replicability_scores_df_ext{}.csv'.format((d+1), file_tag), index=False)
 
         columns = ['time', 'censor', 'treatment']
         _, _, ci_init, _ = fit_cox_model(df_init, columns)
@@ -248,7 +271,7 @@ def run(dataset_name, generators_sel):
         colors = ['green', 'blue', 'orange', 'cyan', 'magenta', 'grey']
 
         colors_ = ['red']
-        for i , generator in enumerate(generators_sel):
+        for generator in generators_sel:
             data_syn_ = df_syn_dict[generator]
             results = [fit_cox_model(data, columns) for data in data_syn_]
             coef_syn, _, _, se_syn = zip(*results)
@@ -258,24 +281,33 @@ def run(dataset_name, generators_sel):
                 midpoints.append((ci_syn[1] + ci_syn[0]) / 2)
                 errors.append((ci_syn[1] - ci_syn[0]) / 2)
                 label.append(generator + " " + str(n + 1))
-                colors_.append(colors[i])
+                colors_.append(colors[color_index[generator] % len(colors)])
 
         err_df = pd.DataFrame({"midpoints" : midpoints,
                             "errors" : errors,
                             "label" : label,
                             "colors" : colors_})
-        err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_error_df_ext.csv'.format((d+1)), index=False)
+        err_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_error_df_ext{}.csv'.format((d+1), file_tag), index=False)
 
         os.chdir(original_dir)
 
 
 if __name__ == "__main__":
     generators_sel = [
-                    # "HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE", 
-                    #   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion",
-                    "TabPFN-naive", "TabPFN-survival_function"
-                      ]
+                    # "HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE",  "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion",
+                    "TabPFN-naive", 
+                    "TabPFN-survival_function-random", 
+                    "TabPFN-survival_function-covariate_dependent",
+                    "TabPFN-survival_function-joint", 
+                    "TabPFN-survivalPFN"
+                    ]
     dataset_sel = ["ACTG320", "NCT00119613", "NCT00113763", "NCT00339183"]
-    dataset_id = int(sys.argv[1])
+
+    # 2D array index: idx = dataset_id * n_generators + gen_id  (0..19)
+    idx = int(sys.argv[1])
+    n_gen = len(generators_sel)
+    dataset_id, gen_id = divmod(idx, n_gen)
     dataset_name = dataset_sel[dataset_id]
-    run(dataset_name , generators_sel)
+    print("array idx {} -> dataset {} (id {}), generator {} (gen_id {})".format(
+        idx, dataset_name, dataset_id, generators_sel[gen_id], gen_id))
+    run(dataset_name, generators_sel, gen_id=gen_id)

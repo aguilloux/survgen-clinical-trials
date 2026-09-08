@@ -193,8 +193,14 @@ def run(dataset_name, generators_sel):
 
         df_log_p_value_control.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_p_value_df.csv'.format((d+1)), index=False)
         general_scores = []
+        continuous_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['pos', 'real']]
+        categorical_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['cat']]
         for generator_name in generators_sel:
-            general_scores.append(general_metrics(df_init_control, df_gen_control_dict[generator_name], generator_name))
+            general_scores.append(general_metrics(df_init_control, df_gen_control_dict[generator_name], generator_name,
+                                                  include_nndr=True, include_tableone_min_p_value=True,
+                                                  categorical=categorical_variables_control,
+                                                  continuous=continuous_variables_control,
+                                                  nonnormal=continuous_variables_control))
         general_scores_df = pd.concat(general_scores)
         general_scores_df.to_csv(save_res_dir + '/traincontrol_aug_Ncontrol{}%3_general_scores_df.csv'.format((d+1)), index=False)
 

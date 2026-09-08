@@ -173,7 +173,8 @@ def run(MC_id):
     list_n_samples_control = [1.0, (2/3), (1/3)]
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
-                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score']
+                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score',
+                                'TableOne min p-value']
 
     # Initialize storage for metrics and results
     synthcity_metrics_res_dict = {generator_name: pd.DataFrame() for generator_name in generators_sel}

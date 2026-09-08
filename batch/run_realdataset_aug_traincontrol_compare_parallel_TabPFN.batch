@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:rtx8000:1
 #SBATCH --mem=24G                       # Memory allocation, adjust based on your usage
 #SBATCH --time=2-00:00:00               # Adjust the time limit as needed (10 hours here)
-#SBATCH --array=0-3                     # one task per dataset
+#SBATCH --array=0-19                    # 2D: idx = dataset_id * 5 + generator_id  (4 datasets x 5 TabPFN models)
 #SBATCH --output=logs/real_TabPFN_aug_traincontrol_compare_%A_%a.out     # Output file named after job and ID
 #SBATCH --error=logs/real_TabPFN_aug_traincontrol_compare_%A_%a.err
 
@@ -18,8 +18,13 @@ module purge
 source /home/$USER/.bashrc
 source activate hivae
 
-# Arguments
-data_ID=${SLURM_ARRAY_TASK_ID}
+# TabPFN + SurvivalPFN weights are pre-downloaded on the login node; keep the
+# offline compute node from trying to reach Hugging Face.
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 
-# Run your Python script
-python3 ../script/realdataset_compare_aug_traincontrol_parallel_TabPFN.py $data_ID
+# Arguments
+task_ID=${SLURM_ARRAY_TASK_ID}
+
+# Run your Python script (task_ID is decoded into dataset + generator inside the script)
+python3 ../script/realdataset_compare_aug_traincontrol_parallel_TabPFN.py $task_ID

@@ -170,7 +170,8 @@ def run(MC_id):
     list_n_samples_control = [1.0] #, (2/3), 1.0]
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
-                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score']
+                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score',
+                                'TableOne min p-value']
 
     list_epsilon = [1, 3, 5, 7, 10]
 
