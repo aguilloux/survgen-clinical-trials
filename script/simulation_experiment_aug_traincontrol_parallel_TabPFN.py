@@ -149,10 +149,10 @@ def run(MC_id, gen_id=None):
 
     generators_sel = [
         "TabPFN-naive", 
-        "TabPFN-survival_function-random", 
-        "TabPFN-survival_function-covariate_dependent",
+        # "TabPFN-survival_function-random", 
+        # "TabPFN-survival_function-covariate_dependent",
         "TabPFN-survival_function-joint",
-        "TabPFN-survivalPFN"
+        # "TabPFN-survivalPFN"
     ]
 
     # 2D SLURM array: when `gen_id` is set this job handles a single generator and

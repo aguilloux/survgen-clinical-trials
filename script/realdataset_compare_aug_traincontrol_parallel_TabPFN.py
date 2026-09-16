@@ -119,7 +119,7 @@ def run(dataset_name, generators_sel, gen_id=None):
         categorical_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['cat']]
 
         # Parameters of the optuna study
-        n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
+        n_generated_dataset = 10 # 200 # number of generated datasets per fold to compute the metric
         name_config = dataset_name
         method_HPO = "DetectXGB"
         optuna_version_name = method_HPO
