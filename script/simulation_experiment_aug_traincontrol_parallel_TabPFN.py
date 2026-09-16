@@ -166,10 +166,10 @@ def run(MC_id, gen_id=None):
 
     TABPFN_MODES = {
                 "TabPFN-naive": {"mode": "naive"},
-                "TabPFN-survival_function-random": {"mode": "survival_function", "censoring_strategy": "random", "tte_model": "survival_function_regression"},
-                "TabPFN-survival_function-covariate_dependent": {"mode": "survival_function", "censoring_strategy": "covariate_dependent", "tte_model": "survival_function_regression"},
+                # "TabPFN-survival_function-random": {"mode": "survival_function", "censoring_strategy": "random", "tte_model": "survival_function_regression"},
+                # "TabPFN-survival_function-covariate_dependent": {"mode": "survival_function", "censoring_strategy": "covariate_dependent", "tte_model": "survival_function_regression"},
                 "TabPFN-survival_function-joint": {"mode": "survival_function", "censoring_strategy": "joint", "tte_model": "survival_function_regression"},
-                "TabPFN-survivalPFN": {"mode": "survival_function", "censoring_strategy": "competing_times", "tte_model": "survivalpfn"},
+                # "TabPFN-survivalPFN": {"mode": "survival_function", "censoring_strategy": "competing_times", "tte_model": "survivalpfn"},
             }
     
     # generators_sel = ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
@@ -180,10 +180,10 @@ def run(MC_id, gen_id=None):
                         "Surv-GAN" : surv_gan,
                         "Surv-VAE" : surv_vae, 
                         "TabPFN-naive" : surv_tabpfn, 
-                        "TabPFN-survival_function-random" : surv_tabpfn, 
-                        "TabPFN-survival_function-covariate_dependent" : surv_tabpfn,
+                        # "TabPFN-survival_function-random" : surv_tabpfn, 
+                        # "TabPFN-survival_function-covariate_dependent" : surv_tabpfn,
                         "TabPFN-survival_function-joint" : surv_tabpfn,
-                        "TabPFN-survivalPFN" : surv_tabpfn,
+                        # "TabPFN-survivalPFN" : surv_tabpfn,
                         # "TabPFN-uncensoring": surv_tabpfn
                         }
     
@@ -433,7 +433,7 @@ def run(MC_id, gen_id=None):
 
 if __name__ == "__main__":
     # 2D array index: idx = MC_id * n_generators + gen_id  (0..29 for 6 MC blocks x 5 models)
-    N_GENERATORS = 5
+    N_GENERATORS = 2 # 5
     idx = int(sys.argv[1])
     MC_id, gen_id = divmod(idx, N_GENERATORS)
     print("array idx {} -> MC_id {}, gen_id {}".format(idx, MC_id, gen_id))
