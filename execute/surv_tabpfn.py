@@ -37,6 +37,7 @@ import torch
 import inspect
 
 from tabpfn import TabPFNClassifier, TabPFNRegressor
+from tabpfn.errors import TabPFNValidationError
 from tabpfn_extensions import unsupervised
 
 module_path = Path.cwd().parent / 'utils'
@@ -84,11 +85,26 @@ def _build_unsupervised_model(params):
 
 
 def _generate_once(model, n_samples, params):
-    return model.generate_synthetic_data(
-        n_samples=n_samples,
-        t=params.get('t', 1.0),
-        n_permutations=params.get('n_permutations', 3),
-    )
+    """
+    `TabPFNUnsupervisedModel.generate_synthetic_data` imputes columns one
+    permutation step at a time, feeding already-sampled columns back in as
+    regressor input for the next step. Occasionally a heavy-tailed conditional
+    draw overflows float32, and the *next* step's `TabPFNRegressor.predict`
+    rejects that infinite input (`TabPFNValidationError`). This is intermittent
+    -- it depends on the stochastic sampling order -- so retrying redraws
+    fresh values rather than deterministically failing again.
+    """
+    max_attempts = params.get('max_generate_attempts', 5)
+    for attempt in range(max_attempts):
+        try:
+            return model.generate_synthetic_data(
+                n_samples=n_samples,
+                t=params.get('t', 1.0),
+                n_permutations=params.get('n_permutations', 3),
+            )
+        except TabPFNValidationError:
+            if attempt == max_attempts - 1:
+                raise
 
 
 # ---------------------------------------------------------------------------
