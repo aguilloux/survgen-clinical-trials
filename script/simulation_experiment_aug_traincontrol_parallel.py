@@ -148,7 +148,8 @@ def run(MC_id):
     # true_miss_file = None
 
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", #"HI-VAE_lognormal", 
-                      "Surv-GAN", "Surv-VAE"]
+                      "Surv-GAN", "Surv-VAE", 
+                      "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
     
     # generators_sel = ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     # generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
@@ -173,8 +174,8 @@ def run(MC_id):
     list_n_samples_control = [1.0, (2/3), (1/3)]
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
-                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score',
-                                'TableOne min p-value']
+                            'Detection XGB', 'NNDR', 'K-map score', 
+                            'Identifiability score', 'TableOne min p-value']
 
     # Initialize storage for metrics and results
     synthcity_metrics_res_dict = {generator_name: pd.DataFrame() for generator_name in generators_sel}

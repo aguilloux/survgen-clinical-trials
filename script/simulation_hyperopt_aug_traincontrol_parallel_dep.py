@@ -24,7 +24,7 @@ print('Device :', DEVICE)
 
 def run(generator_name):
 
-    n_samples = 600
+    n_samples = 300
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -125,12 +125,12 @@ def run(generator_name):
        
         # Parameters of the optuna study
         HPO_version = "external_metrics"
-        metric_optuna = "detection_xgb" # metric to optimize in optuna
+        metric_optuna = ["detection_xgb"] # metric to optimize in optuna
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation
         n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
-        name_config = "simu_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, (d+1), n_features_bytype, int(treatment_effect))
-
+        name_config = "simu_N{}_Ncontrol{}%3_nfeat{}_t{}".format(n_samples, int(perc_control*3+0.01), n_features_bytype, int(treatment_effect))
+        
         generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
                         "HI-VAE_lognormal" : surv_hivae,
@@ -153,8 +153,8 @@ def run(generator_name):
         best_params_dict, study_dict = {}, {}
         n_trials = 150
         print("{} trials for {}...".format(n_trials, generator_name))
-        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, metric_optuna, generator_name)
-        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, metric_optuna, generator_name)
+        study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, method_HPO, generator_name)
+        best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, method_HPO, generator_name)
         db_file = study_name + ".db"
         if os.path.exists(db_file):
             print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))
@@ -244,10 +244,10 @@ def setup_unique_working_dir(base_dir="experiments"):
 
 if __name__ == "__main__":
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
-                      "Surv-GAN", "Surv-VAE", 
-                      "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
-                      "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP",
-                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion", 
-                      "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"]
+                      "Surv-GAN", "Surv-VAE"]
+                    #   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                    #   "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP",
+                    #   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion", 
+                    #   "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"]
     generator_id = int(sys.argv[1])
     run(generators_sel[generator_id])

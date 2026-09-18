@@ -100,7 +100,7 @@ def setup_unique_working_dir(base_dir=None):
 def run(MC_id):
 
     # Simulation parameters
-    n_samples = 600
+    n_samples = 300
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -148,9 +148,9 @@ def run(MC_id):
     # true_miss_file = None
 
     generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", #"HI-VAE_lognormal", 
-                      "Surv-GAN", "Surv-VAE", 
-                      "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
-                      "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
+                      "Surv-GAN", "Surv-VAE"] # , 
+                    #   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
+                    #   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
     # generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
@@ -173,7 +173,8 @@ def run(MC_id):
     list_n_samples_control = [1.0, (2/3), (1/3)]
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
-                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score']
+                            'Detection XGB', 'NNDR', 'K-map score', 
+                            'Identifiability score', 'TableOne min p-value']
 
     # Initialize storage for metrics and results
     synthcity_metrics_res_dict = {generator_name: pd.DataFrame() for generator_name in generators_sel}
@@ -252,7 +253,9 @@ def run(MC_id):
             df_init_control = pd.DataFrame(data_init_control.numpy(), columns=fnames)
             df_init_control["treatment"] = 0
 
-
+            continuous_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['pos', 'real']]
+            categorical_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['cat']]
+            
             df_gen_control_dict ={}
             # For each generator, perform the data generation with the best params
             for generator_name in generators_sel:
@@ -290,7 +293,10 @@ def run(MC_id):
                 # synthcity_metrics_res_dict[generator_name] = pd.concat([synthcity_metrics_res_dict[generator_name], 
                 #                                                         synthcity_metrics_res_ext])
             
-                synthcity_metrics_res = general_metrics(df_init_control, list_df_gen_control, generator_name)[synthcity_metrics_sel]
+                synthcity_metrics_res = general_metrics(df_init_control, list_df_gen_control, generator_name, 
+                                                        include_nndr=True, include_tableone_min_p_value=True, 
+                                                        categorical=categorical_variables_control, continuous=continuous_variables_control, 
+                                                        nonnormal=continuous_variables_control)[synthcity_metrics_sel]
                 for _ in np.arange(len(treat_effects)):
                     synthcity_metrics_res_dict[generator_name] = pd.concat([synthcity_metrics_res_dict[generator_name], synthcity_metrics_res])
                    

@@ -188,7 +188,7 @@ def run(MC_id, gen_id=None):
                         }
     
     # MONTE-CARLO EXPERIMENT
-    n_MC_exp = 10
+    n_MC_exp = 5
     treat_effects = np.arange(0., 1.1, 0.2)
     list_n_samples_control = [1.0, (2/3), (1/3)]
     n_generated_dataset = 200
@@ -302,10 +302,10 @@ def run(MC_id, gen_id=None):
                         params["tte_model"] = TABPFN_MODES[generator_name]["tte_model"]
                     data_gen_control = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                            target_column="censor", time_to_event_column="time",
-                                                                            n_generated_dataset=n_generated_dataset, 
-                                                                            n_generated_sample=max(treated.shape[0], control.shape[0]), 
-                                                                            params=params, feat_types_dict=feat_types_dict, 
-                                                                            apply_rounding=True, mode=TABPFN_MODES[generator_name]["mode"])
+                                                                           n_generated_dataset=n_generated_dataset, 
+                                                                           n_generated_sample=max(treated.shape[0], control.shape[0]), 
+                                                                           params=params, feat_types_dict=feat_types_dict, 
+                                                                           apply_rounding=True, mode=TABPFN_MODES[generator_name]["mode"])
                 else:
                     best_params = best_params_dict[generator_name]
                     data_gen_control = generators_dict[generator_name].run(data_init_control, columns=fnames, 
@@ -432,7 +432,7 @@ def run(MC_id, gen_id=None):
     shutil.rmtree(os.path.join(os.environ.get("SCRATCH", "/tmp"), f"survgen_runs_{os.getpid()}"), ignore_errors=True)
 
 if __name__ == "__main__":
-    # 2D array index: idx = MC_id * n_generators + gen_id  (0..29 for 6 MC blocks x 5 models)
+    # 2D array index: idx = MC_id * n_generators + gen_id  (0..39 for 20 MC blocks x 2 models, 100 MC total)
     N_GENERATORS = 2 # 5
     idx = int(sys.argv[1])
     MC_id, gen_id = divmod(idx, N_GENERATORS)

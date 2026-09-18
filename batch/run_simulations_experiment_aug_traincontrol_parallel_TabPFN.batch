@@ -2,7 +2,7 @@
 #SBATCH --job-name=sim_TabPFN_exp_aug_traincontrol_parallel
 #SBATCH --output=logs/sim_TabPFN_exp_aug_traincontrol_%A_%a.out
 #SBATCH --error=logs/sim_TabPFN_exp_aug_traincontrol_%A_%a.err
-#SBATCH --array=0-11  # 2D: idx = MC_id * 5 + generator_id  (6 MC blocks x 2 TabPFN models)
+#SBATCH --array=0-39  # 2D: idx = MC_id * 2 + generator_id  (20 MC blocks x 2 TabPFN models, 100 MC total)
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
