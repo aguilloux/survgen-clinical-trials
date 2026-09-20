@@ -2,7 +2,7 @@
 #SBATCH --job-name=hyperopt_aug_traincontrol_parallel
 #SBATCH --output=logs/hyperopt_aug_traincontrol_%A_%a.out
 #SBATCH --error=logs/hyperopt_aug_traincontrol_%A_%a.err
-#SBATCH --array=0-3  # one task per generator
+#SBATCH --array=0-1  # one task per generator
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
