@@ -125,6 +125,7 @@ def run(generator_name):
        
         # Parameters of the optuna study
         HPO_version = "external_metrics"
+        method_HPO = "detection_xgb"
         metric_optuna = ["detection_xgb"] # metric to optimize in optuna
         method_hyperopt = "train_full_gen_full"
         n_splits = 5 # number of splits for cross-validation

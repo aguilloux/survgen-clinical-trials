@@ -36,6 +36,7 @@ def run(generator_name):
     feature_types_list = ["real", "cat"]
     independent = True
     data_types_create = True
+    seed_optuna = 10 # 10
 
     list_n_samples_control = [(1/3), (2/3), 1.0]
     # treatment_effect = 0.0 # Treatment effect on the treated group for hyperopt
@@ -150,7 +151,9 @@ def run(generator_name):
             df_init_full = pd.DataFrame(data_init_full.numpy(), columns=fnames)
 
             # Parameters of the optuna study
-            metric_optuna = "survival_km_distance" # metric to optimize in optuna
+            HPO_version = "external_metrics"
+            method_HPO = "detection_xgb"
+            metric_optuna = ["detection_xgb"] # metric to optimize in optuna
             method_hyperopt = "train_full_gen_full"
             n_splits = 5 # number of splits for cross-validation
             n_generated_dataset = 200 # number of generated datasets per fold to compute the metric
@@ -169,12 +172,10 @@ def run(generator_name):
                 os.makedirs(parent_path + "/dataset/" + dataset_name + "/optuna_results")
 
             best_params_dict, study_dict = {}, {}
-            # for generator_name in generators_sel:
-            # n_trials = min(100, int(multiplier_trial * generators_dict[generator_name].get_n_hyperparameters(generator_name)))
             n_trials = 150
             print("{} trials for {}...".format(n_trials, generator_name))
-            study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, metric_optuna, generator_name)
-            best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, metric_optuna, generator_name)
+            study_name = parent_path + "/dataset/" + dataset_name + "/optuna_results/optuna_study_{}_ntrials{}_{}_{}".format(name_config, n_trials, method_HPO, generator_name)
+            best_params_file = parent_path + "/dataset/" + dataset_name + "/optuna_results/best_params_{}_ntrials{}_{}_{}.json".format(name_config, n_trials, method_HPO, generator_name)       
             db_file = study_name + ".db"
             if os.path.exists(db_file):
                 print("This optuna study ({}) already exists for {}. We will use this existing file.".format(db_file, generator_name))
@@ -183,21 +184,21 @@ def run(generator_name):
 
             os.chdir(work_dir)  # Switch to private work dir
 
-            if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise", "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
+            if generator_name in ["HI-VAE_lognormal", "HI-VAE_weibull", "HI-VAE_piecewise", 
+                                  "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
                 feat_types_dict_ext = feat_types_dict_full.copy()
                 for i in range(len(feat_types_dict)):
                     if feat_types_dict_ext[i]['name'] == "survcens":
-                        if generator_name in ["HI-VAE_weibull", "HI-VAE_weibull_prior"]:
+                        if "HI-VAE_weibull" in generator_name:
                             feat_types_dict_ext[i]["type"] = 'surv_weibull'
-                        elif generator_name in ["HI-VAE_lognormal"]:
+                        elif "HI-VAE_lognormal" in generator_name:
                             feat_types_dict_ext[i]["type"] = 'surv'
                         else:
                             feat_types_dict_ext[i]["type"] = 'surv_piecewise'
-                if generator_name in ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]:
-                    gen_from_prior = True
-                else:
-                    gen_from_prior = False
+                gen_from_prior = "_prior" in generator_name
                 condition = {'var': 'treatment_0', 'value': 1.0, 'n_samples': treated.shape[0]}  # Condition on the control group
+                differential_privacy = False
+                diffusion = False
                 best_params, study = generators_dict[generator_name].optuna_hyperparameter_search(df_init_full_encoded,
                                                                                                 miss_mask_full, 
                                                                                                 true_miss_mask_full,
@@ -207,11 +208,21 @@ def run(generator_name):
                                                                                                 n_trials=n_trials, 
                                                                                                 columns=fnames,
                                                                                                 generator_name=generator_name,
-                                                                                                epochs=10000,
                                                                                                 metric=metric_optuna,
                                                                                                 study_name=study_name, 
                                                                                                 method=method_hyperopt, 
-                                                                                                gen_from_prior=gen_from_prior, 
+                                                                                                gen_from_prior=gen_from_prior,
+                                                                                                seed=seed_optuna,
+                                                                                                target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
+                                                                                                target_delta=1e-5,
+                                                                                                tune_params=None, # if None, the function will use the default hyperparameters to tune,
+                                                                                                fixed_params={"epochs": 10000, "n_samples_gen": treated.shape[0]}, # these parameters will be fixed to the specified value and not tuned,
+                                                                                                norm_mode="global",
+                                                                                                screening_epochs=800,
+                                                                                                n_startup_trials=20,
+                                                                                                differential_privacy=differential_privacy, 
+                                                                                                diffusion=diffusion, 
+                                                                                                do_prune=False,
                                                                                                 condition=condition, 
                                                                                                 cond_df=df_init_control_encoded)
                 best_params_dict[generator_name] = best_params
