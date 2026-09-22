@@ -100,7 +100,7 @@ def setup_unique_working_dir(base_dir=None):
 def run(MC_id):
 
     # Simulation parameters
-    n_samples = 300
+    n_samples = 300 # 600, 1200
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -147,11 +147,9 @@ def run(MC_id):
     # miss_file = os.path.join(base_path, "Missing.csv")
     # true_miss_file = None
 
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", #"HI-VAE_lognormal", 
-                      "Surv-GAN", "Surv-VAE"] # , 
-                    #   "HI-VAE_weibull_prior", "HI-VAE_piecewise_prior",
-                    #   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
-    # generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
+                      "Surv-GAN", "Surv-VAE"] 
+    
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
                         "HI-VAE_lognormal" : surv_hivae,
@@ -256,7 +254,7 @@ def run(MC_id):
             continuous_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['pos', 'real']]
             categorical_variables_control = [row['name'] for row in feat_types_dict if row['type'] in ['cat']]
             
-            df_gen_control_dict ={}
+            df_gen_control_dict = {}
             # For each generator, perform the data generation with the best params
             for generator_name in generators_sel:
                 best_params = best_params_dict[generator_name]
