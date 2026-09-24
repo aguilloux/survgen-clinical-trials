@@ -198,7 +198,6 @@ def run(generator_name):
                                                                                                 metric=metric_optuna,
                                                                                                 study_name=study_name, 
                                                                                                 method=method_hyperopt, 
-                                                                                                seed=10,
                                                                                                 # gen_from_prior=gen_from_prior,
                                                                                                 seed=seed_optuna,
                                                                                                 target_epsilon=1.0, # None if not DP, otherwise the target epsilon for the DP generators
