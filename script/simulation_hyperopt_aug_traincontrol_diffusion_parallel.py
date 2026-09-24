@@ -39,8 +39,8 @@ def run(generator_name):
     differential_privacy = True
     diffusion_var = "z_and_s"  # "z" or "z_and_s"
 
-    # list_n_samples_control = [(1/3), (2/3), 1.0]
-    list_n_samples_control = [1.0]
+    list_n_samples_control = [(1/3), (2/3), 1.0]
+    # list_n_samples_control = [1.0]
     treatment_effect = 0.0 # Treatment effect on the treated group for hyperopt
 
     current_path = os.getcwd()  # Get current working directory
@@ -250,6 +250,5 @@ def setup_unique_working_dir(base_dir="experiments"):
 
 if __name__ == "__main__":
     generators_sel = ["HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion"]
-    # job_id = int(sys.argv[1])
-    job_id = 0
+    job_id = int(sys.argv[1])
     run(generators_sel[job_id])
