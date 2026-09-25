@@ -337,7 +337,8 @@ def generate_from_condition_HIVAE(vae_model, df, miss_mask, true_miss_mask, feat
 # GENERATION FUNCTIONS: without conditioning on a feature value.
 # ──────────────────────────────────────────────────────────────
  
-def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, from_prior=False, diffusion=False, diffusion_params=None, apply_rounding=False, diffusion_var="z"):
+def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample=None, 
+                        from_prior=False, diffusion=False, diffusion_params=None, apply_rounding=False, diffusion_var="z", generation_level="decoder"):
     """
         Generation from a trained HIVAE, without conditioning. 
         If `n_generated_sample` is specified, generation is performed on an extended dataset of that size (with samples drawn with replacement from the original data) 
@@ -395,11 +396,22 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
                 else:
                     raise ValueError(f"Invalid diffusion_var: {diffusion_var}. Must be 'z' or 'z_and_s'.")
             else:
-                vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset)
+                vae_res = vae_model.forward(data_list_observed, data_list, miss_list, tau=1e-3, n_generated_dataset=n_generated_dataset, generation_level=generation_level)
             samples_list.append(vae_res["samples"])
         
         # Concatenate samples in arrays
         est_data_gen = statistic.samples_concatenation(samples_list)[-1]
+
+        # --- Restore [K, N, ...] structure -----------------------------------
+        if generation_level == "encoder":
+            est_data_gen = est_data_gen.squeeze(0)
+
+            est_data_gen = est_data_gen.reshape(
+                n_generated_dataset,
+                n_generated_sample,
+                *est_data_gen.shape[1:]
+            )
+
         est_data_gen_transformed = []
         for j in range(n_generated_dataset):
             data_trans = data_processing.discrete_variables_transformation(est_data_gen[j], feat_types_dict)
@@ -474,7 +486,7 @@ def _validate_norm_mode(norm_mode, differential_privacy):
 def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
         n_generated_sample=None, params=None, verbose=True, plot=False, 
         gen_from_prior=False, condition=None, differential_privacy=False,
-        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False, apply_rounding=False, diffusion_var="z",
+        norm_mode="global", seed=1, target_epsilon=None, target_delta=1e-5, diffusion=False, apply_rounding=False, diffusion_var="z", generation_level="decoder",
         **hp_overrides):
     """
         End-to-end entry point: build a HIVAE, train it on `df`, and generate `n_generated_dataset` synthetic datasets.
@@ -536,7 +548,8 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
                                                                          n_generated_sample_, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
             else:
                 est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
-                                                                n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, diffusion_var=diffusion_var)
+                                                                n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, 
+                                                                diffusion_var=diffusion_var, generation_level=generation_level)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
@@ -544,7 +557,8 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
         if condition is not None:
             est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
         else:
-            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, diffusion_var=diffusion_var)
+            est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, 
+                                                           diffusion_var=diffusion_var, generation_level=generation_level)
 
         if plot:
             loss_track = {"epoch": list(range(1, len(loss_train) + 1)),

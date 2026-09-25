@@ -140,7 +140,7 @@ class HIVAE(nn.Module):
                 })
 
 
-    def forward(self, batch_data_oberved, batch_data, batch_miss, tau=1.0, n_generated_dataset=1):
+    def forward(self, batch_data_oberved, batch_data, batch_miss, tau=1.0, n_generated_dataset=1, generation_level="decoder"):
         """
         Forward pass through the encoder and decoder.
 
@@ -159,10 +159,41 @@ class HIVAE(nn.Module):
         
         # Encode
         X = torch.cat(X_list, dim=1) 
-        q_params, samples = self.encode(X, tau)
-        
-        # Decode
-        p_params, log_p_x, log_p_x_missing, samples = self.decode(samples, batch_data, batch_miss, normalization_params, n_generated_dataset)
+        # --- Generation strategy ------------------------------------------
+        if generation_level == "decoder":
+            X_enc = X
+            data_dec = batch_data
+            miss_dec = batch_miss
+            n_decoder_samples = n_generated_dataset
+
+        elif generation_level == "encoder":
+            K = n_generated_dataset
+
+            X_enc = X.repeat(K, 1)
+            data_dec = [
+                x.repeat(K, *([1] * (x.dim() - 1)))
+                for x in batch_data
+            ]
+            miss_dec = batch_miss.repeat(K, 1)
+
+            n_decoder_samples = 1
+
+        else:
+            raise ValueError(
+                "generation_level must be 'decoder' or 'encoder'."
+            )
+
+        # --- Encode -------------------------------------------------------
+        q_params, samples = self.encode(X_enc, tau)
+
+        # --- Decode: one X sample per latent sample -----------------------
+        p_params, log_p_x, log_p_x_missing, samples = self.decode(
+            samples,
+            data_dec,
+            miss_dec,
+            normalization_params,
+            n_decoder_samples,
+        )
 
         # Compute loss
         ELBO, loss_reconstruction, KL_z, KL_s = self.loss_function(log_p_x, p_params, q_params)
