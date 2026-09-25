@@ -100,7 +100,7 @@ def setup_unique_working_dir(base_dir=None):
 def run(MC_id):
 
     # Simulation parameters
-    n_samples = 300 # 600, 1200
+    n_samples = 600 # 600, 1200
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -147,8 +147,7 @@ def run(MC_id):
     # miss_file = os.path.join(base_path, "Missing.csv")
     # true_miss_file = None
 
-    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise",
-                      "Surv-GAN", "Surv-VAE"] 
+    generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", "Surv-GAN", "Surv-VAE"] 
     
     generators_dict = {"HI-VAE_weibull" : surv_hivae,
                         "HI-VAE_piecewise" : surv_hivae,
@@ -270,7 +269,8 @@ def run(MC_id):
                                                                         gen_from_prior=gen_from_prior, norm_mode="global",
                                                                         n_generated_sample=max(treated.shape[0], control.shape[0]),
                                                                         differential_privacy=differential_privacy,
-                                                                        diffusion=diffusion)
+                                                                        diffusion=diffusion, 
+                                                                        generation_level="encoder")
                 else:
                     data_gen_control = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                         target_column="censor", time_to_event_column="time", 

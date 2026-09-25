@@ -272,7 +272,8 @@ def run(MC_id):
                                                                         n_generated_sample=max(treated.shape[0], control.shape[0]),
                                                                         differential_privacy=differential_privacy,
                                                                         diffusion=diffusion,
-                                                                        diffusion_var="z_and_s")
+                                                                        diffusion_var="z_and_s",
+                                                                        generation_level="encoder")
                 else:
                     data_gen_control = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                         target_column="censor", time_to_event_column="time", 
