@@ -163,7 +163,8 @@ def run(dataset_name, generators_sel):
                                                                                                 diffusion=diffusion,
                                                                                                 differential_privacy=differential_privacy,
                                                                                                 target_epsilon=eps,
-                                                                                                apply_rounding=True)
+                                                                                                apply_rounding=True,
+                                                                                                generation_level="encoder")
                 else:
                     data_gen_control_dict[generator_name] = generators_dict[generator_name].run(data_init_control, columns=fnames, 
                                                                                                 target_column="censor",
