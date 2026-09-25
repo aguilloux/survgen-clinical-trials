@@ -37,7 +37,7 @@ def run(generator_name):
     data_types_create = True
     seed_optuna = 10 # 10
 
-    list_n_samples_control = [(1/3), (2/3), 1.0]
+    list_n_samples_control = [(2/3), 1.0] # [(1/3), (2/3), 1.0]
     treatment_effect = 0.0 # Treatment effect on the treated group for hyperopt
 
     current_path = os.getcwd()  # Get current working directory
@@ -246,7 +246,7 @@ def setup_unique_working_dir(base_dir="experiments"):
 if __name__ == "__main__":
     # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
                     #   "Surv-GAN", "Surv-VAE"] 
-    generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
+    generators_sel = ["HI-VAE_weibull_prior"] # ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
     #                   "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP",
     #                   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion", 
     #                   "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"]
