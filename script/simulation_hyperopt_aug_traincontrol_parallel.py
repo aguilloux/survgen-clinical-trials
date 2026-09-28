@@ -24,7 +24,7 @@ print('Device :', DEVICE)
 
 def run(generator_name):
 
-    n_samples = 300
+    n_samples = 1200
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -246,7 +246,7 @@ def setup_unique_working_dir(base_dir="experiments"):
 if __name__ == "__main__":
     # generators_sel = ["HI-VAE_weibull", "HI-VAE_piecewise", 
                     #   "Surv-GAN", "Surv-VAE"] 
-    generators_sel = ["HI-VAE_weibull_prior"] # ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
+    generators_sel = ["HI-VAE_weibull_prior", "HI-VAE_piecewise_prior"]
     #                   "HI-VAE_weibull_DP", "HI-VAE_piecewise_DP",
     #                   "HI-VAE_weibull_diffusion", "HI-VAE_piecewise_diffusion", 
     #                   "HI-VAE_weibull_diffusion_DP", "HI-VAE_piecewise_diffusion_DP"]
