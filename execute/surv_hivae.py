@@ -402,8 +402,9 @@ def generate_from_HIVAE(vae_model, data, miss_mask, true_miss_mask, feat_types_d
         # Concatenate samples in arrays
         est_data_gen = statistic.samples_concatenation(samples_list)[-1]
 
-        # --- Restore [K, N, ...] structure -----------------------------------
-        if generation_level == "encoder":
+        # Only standard encoder generation flattens K datasets into the batch.
+        # Prior and diffusion generation already return [K, N, ...].
+        if generation_level == "encoder" and not from_prior and not diffusion:
             est_data_gen = est_data_gen.squeeze(0)
 
             est_data_gen = est_data_gen.reshape(
