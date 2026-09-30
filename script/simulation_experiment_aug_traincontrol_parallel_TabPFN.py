@@ -100,7 +100,7 @@ def setup_unique_working_dir(base_dir=None):
 def run(MC_id, gen_id=None):
 
     # Simulation parameters
-    n_samples = 600
+    n_samples = 1200
     n_features_bytype = 6
     n_active_features = 3 
     p_treated = 0.5
@@ -193,7 +193,8 @@ def run(MC_id, gen_id=None):
     list_n_samples_control = [1.0, (2/3), (1/3)]
     n_generated_dataset = 200
     synthcity_metrics_sel = ['J-S distance', 'KS test', 'Survival curves distance',
-                                'Detection XGB', 'NNDR', 'K-map score', 'Identifiability score']
+                                'Detection XGB', 'NNDR', 'K-map score', 
+                                'Identifiability score', 'TableOne min p-value']
     params_tabpfn = {"t": 1.0, "n_permutations": 1}
 
     # Initialize storage for metrics and results
