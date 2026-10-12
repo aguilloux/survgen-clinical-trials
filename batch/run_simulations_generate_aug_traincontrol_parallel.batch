@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --job-name=sim_generate
+#SBATCH --output=logs/sim_generate_%A_%a.out
+#SBATCH --error=logs/sim_generate_%A_%a.err
+#SBATCH --array=0-19 #%8
+#SBATCH --cpus-per-task=8
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:rtx8000:1
+
+# Submit from batch/ after creating logs/. One MC (both variants, all fractions)
+# per task avoids concurrent writers for the same context. Adjust %8 to capacity.
+set -eo pipefail
+module purge
+source /home/$USER/.bashrc
+source activate hivae
+
+PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
+N_SAMPLES="${N_SAMPLES:-600}"
+N_GENERATED="${N_GENERATED:-200}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_N${N_SAMPLES}}"
+MC_START=$((SLURM_ARRAY_TASK_ID * 50 + 1))
+cd "$PROJECT_ROOT"
+python3 script/simulation_generate_aug_traincontrol_parallel.py \
+  --mc-start "$MC_START" --n-mc 50 --n-samples "$N_SAMPLES" \
+  --n-generated-dataset "$N_GENERATED" --device cuda --output-dir "$ARCHIVE_ROOT"

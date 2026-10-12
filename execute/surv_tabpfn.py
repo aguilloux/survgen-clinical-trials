@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 import torch
 import inspect
+from time import perf_counter
 
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 from tabpfn.errors import TabPFNValidationError
@@ -79,12 +80,22 @@ def _categorical_indices(columns, target_column, feat_types_dict):
 
 
 def _build_unsupervised_model(params):
-    clf = TabPFNClassifier(device=params.get('device', 'auto'), n_estimators=params.get('n_estimators', 'auto'))
-    reg = TabPFNRegressor(device=params.get('device', 'auto'), n_estimators=params.get('n_estimators', 'auto'))
+    options = dict(device=params.get('device', 'auto'), n_estimators=params.get('n_estimators', 'auto'))
+    # Opt-in only: cached inference can trade GPU memory for time. Standard defaults
+    # stay untouched, and the extension still refits for each conditional problem.
+    if 'fit_mode' in params:
+        options['fit_mode'] = params['fit_mode']
+    clf = TabPFNClassifier(**options)
+    reg = TabPFNRegressor(**options)
     return unsupervised.TabPFNUnsupervisedModel(tabpfn_clf=clf, tabpfn_reg=reg)
 
 
-def _generate_once(model, n_samples, params):
+def _record_time(profile, key, started):
+    if profile is not None:
+        profile[key] = profile.get(key, 0.0) + perf_counter() - started
+
+
+def _generate_once(model, n_samples, params, profile=None):
     """
     `TabPFNUnsupervisedModel.generate_synthetic_data` imputes columns one
     permutation step at a time, feeding already-sampled columns back in as
@@ -103,6 +114,8 @@ def _generate_once(model, n_samples, params):
                 n_permutations=params.get('n_permutations', 3),
             )
         except TabPFNValidationError:
+            if profile is not None:
+                profile['generation_retries'] = profile.get('generation_retries', 0) + 1
             if attempt == max_attempts - 1:
                 raise
 
@@ -491,7 +504,7 @@ def _fit_tte_model(Xcov, T, E, method='survival_function_regression', params=Non
 # Mode implementations
 # ---------------------------------------------------------------------------
 def _run_naive(df, columns, target_column, time_to_event_column, cat_indices,
-               n_generated_dataset, n_generated_sample, params, apply_rounding, feat_types_dict):
+               n_generated_dataset, n_generated_sample, params, apply_rounding, feat_types_dict, profile=None):
     """
     mode="naive": TabPFN jointly samples covariates + time + event as ordinary columns, with no censoring awareness. 
     Post-hoc guards only: event rounded to {0, 1}, time clamped strictly positive.
@@ -499,17 +512,26 @@ def _run_naive(df, columns, target_column, time_to_event_column, cat_indices,
     target_idx = columns.index(target_column)
     time_idx = columns.index(time_to_event_column)
 
+    started = perf_counter()
     model = _build_unsupervised_model(params)
     model.set_categorical_features(cat_indices)
     model.fit(df)
+    _record_time(profile, 'context_setup_seconds', started)
 
+    started = perf_counter()
+    rounding_plan = data_processing.prepare_rounding_plan(df.values, feat_types_dict) if apply_rounding else None
+    _record_time(profile, 'rounding_setup_seconds', started)
     est_data_gen = []
     for _ in range(n_generated_dataset):
-        out = _generate_once(model, n_generated_sample, params)
+        started = perf_counter()
+        out = _generate_once(model, n_generated_sample, params, profile)
+        _record_time(profile, 'tabpfn_sampling_seconds', started)
+        started = perf_counter()
         out[:, target_idx] = out[:, target_idx].round().clamp(0, 1)
         out[:, time_idx] = out[:, time_idx].clamp(min=_MIN_TIME)
         if apply_rounding:
-            out = data_processing.round_data_gen(df.values, out, feat_types_dict)
+            out = data_processing.round_data_gen(df.values, out, feat_types_dict, rounding_plan=rounding_plan)
+        _record_time(profile, 'postprocessing_seconds', started)
         est_data_gen.append(out)
     return est_data_gen
 
@@ -536,7 +558,7 @@ def _sample_synthetic_events(censoring_strategy, gen_df, cov_gen_df, target_colu
 
 
 def _run_survival_function(df, columns, target_column, time_to_event_column, cat_indices,
-                           n_generated_dataset, n_generated_sample, params, apply_rounding, feat_types_dict):
+                           n_generated_dataset, n_generated_sample, params, apply_rounding, feat_types_dict, profile=None):
     """
     mode="survival_function": TabPFN generates covariates (plus the event column only when `censoring_strategy="joint"`); 
     the event indicator is set per `censoring_strategy`; and time is computed by a censoring-aware TTE model via `predict_any(X, event)`. 
@@ -558,7 +580,9 @@ def _run_survival_function(df, columns, target_column, time_to_event_column, cat
             "tte_model='survivalpfn'."
         )
 
+    started = perf_counter()
     tte_model = _fit_tte_model(Xcov, T, E, method=tte_method, params=params,)
+    _record_time(profile, 'tte_fit_seconds', started)
 
     censoring_clf = None
     if censoring_strategy == 'covariate_dependent':
@@ -569,13 +593,22 @@ def _run_survival_function(df, columns, target_column, time_to_event_column, cat
     cov_columns = list(Xcov.columns)
     fit_columns = cov_columns + [target_column] if censoring_strategy == 'joint' else cov_columns
     fit_cat_indices = [fit_columns.index(columns[i]) for i in cat_indices if columns[i] in fit_columns]
+    started = perf_counter()
     model = _build_unsupervised_model(params)
     model.set_categorical_features(fit_cat_indices)
     model.fit(df[fit_columns])
+    _record_time(profile, 'context_setup_seconds', started)
 
+    started = perf_counter()
+    rounding_plan = data_processing.prepare_rounding_plan(df.values, feat_types_dict) if apply_rounding else None
+    _record_time(profile, 'rounding_setup_seconds', started)
     est_data_gen = []
     for _ in range(n_generated_dataset):
-        gen_df = pd.DataFrame(_generate_once(model, n_generated_sample, params).numpy(), columns=fit_columns)
+        started = perf_counter()
+        sampled = _generate_once(model, n_generated_sample, params, profile)
+        _record_time(profile, 'tabpfn_sampling_seconds', started)
+        started = perf_counter()
+        gen_df = pd.DataFrame(sampled.detach().cpu().numpy(), columns=fit_columns)
         cov_gen_df = gen_df[cov_columns].copy()
 
         if censoring_strategy == 'competing_times':
@@ -597,7 +630,8 @@ def _run_survival_function(df, columns, target_column, time_to_event_column, cat
         out_df = out_df[columns]  # restore the original column order
         out = torch.from_numpy(out_df.to_numpy(dtype='float32'))
         if apply_rounding:
-            out = data_processing.round_data_gen(df.values, out, feat_types_dict)
+            out = data_processing.round_data_gen(df.values, out, feat_types_dict, rounding_plan=rounding_plan)
+        _record_time(profile, 'postprocessing_seconds', started)
         est_data_gen.append(out)
     return est_data_gen
 
@@ -607,7 +641,7 @@ def _run_survival_function(df, columns, target_column, time_to_event_column, cat
 # ---------------------------------------------------------------------------
 def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         n_generated_sample=None, params=None, cond_gen=None, apply_rounding=False,
-        feat_types_dict=None, mode='naive'):
+        feat_types_dict=None, mode='naive', profile=None):
     """
     Use TabPFN for survival data generation.
 
@@ -630,7 +664,8 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
     params : dict, optional
         Shared generation knobs: `t` (temperature, default 1.0),
         `n_permutations` (default 3), `n_estimators` / `device` (TabPFN model
-        knobs).
+        knobs). `fit_mode` optionally forwards the TabPFN inference strategy;
+        omit it to retain the installed version's default.
 
         mode="survival_function" only:
           - `tte_model` : time-to-event backend --
@@ -648,6 +683,9 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
             `survivalpfn_sample_times` (bool, default True).
             `survivalpfn_point_estimate` ("median"/"mode"/"rmst") is used only
             when `survivalpfn_sample_times=False`.
+    profile : dict, optional
+        Filled with wall-clock stage timings and retry counts. Does not change
+        random draws. Survival-mode postprocessing includes TTE prediction.
     cond_gen : not supported
         TabPFNUnsupervisedModel has no native conditional-generation API.
         Passing a non-None value raises NotImplementedError.
@@ -686,4 +724,4 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
 
     runner = _run_naive if mode == 'naive' else _run_survival_function
     return runner(df, columns, target_column, time_to_event_column, cat_indices,
-                  n_generated_dataset, n_generated_sample, params, apply_rounding, feat_types_dict)
+                  n_generated_dataset, n_generated_sample, params, apply_rounding, feat_types_dict, profile)

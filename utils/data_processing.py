@@ -799,7 +799,23 @@ def _round_column(data_gen_round, feat_idx, series, coverage=0.99):
     data_gen_round[:, feat_idx] = col.clip(min=round_floor)
 
 
-def round_data_gen(data_org, data_gen, feat_types_dict):
+def prepare_rounding_plan(data_org, feat_types_dict):
+    """Infer a reusable rounding grid once for an unchanged real dataset."""
+    plan = []
+    feat_idx = 0
+    survival_types = ('surv', 'surv_weibull', 'surv_loglog', 'surv_piecewise')
+    for descriptor in feat_types_dict:
+        ftype = descriptor['type']
+        if ftype in survival_types or ftype in ('pos', 'real'):
+            series = data_org[:, feat_idx]
+            step = infer_rounding_step(series, coverage=0.99)
+            if step is not None:
+                plan.append((feat_idx, step, series.min()))
+        feat_idx += 2 if ftype in survival_types else 1
+    return plan
+
+
+def round_data_gen(data_org, data_gen, feat_types_dict, rounding_plan=None):
     """
     Rounds generated columns onto the precision grid inferred from the
     corresponding original (real) columns.
@@ -810,6 +826,12 @@ def round_data_gen(data_org, data_gen, feat_types_dict):
     occupy a single column and is left untouched.
     """
     data_gen_round = data_gen.clone()
+    if rounding_plan is not None:
+        for feat_idx, step, round_floor in rounding_plan:
+            col = data_gen_round[:, feat_idx]
+            col = np.round(col / step) * step
+            data_gen_round[:, feat_idx] = col.clip(min=round_floor)
+        return data_gen_round
     feat_idx = 0
     for d in feat_types_dict:
         ftype = d['type']

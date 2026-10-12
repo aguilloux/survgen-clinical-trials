@@ -48,6 +48,9 @@ Each dataset (real or simulated) should have its own folder and contain the foll
 
 ## Files Description
 
+For resumable control-augmentation simulations with separate generation and analysis,
+see the [two-stage simulation guide](script/simulation_two_stage.md).
+
 The repository is organized as follows:
 
 * **execute/** – Scripts to **train, generate data, and optimize hyperparameters** for each model: `surv-GAN`, `surv-VAE`, `HI-VAE_piecewise`, `HI-VAE_weibull`, `TabPFN` (naive / uncensoring modes).  
