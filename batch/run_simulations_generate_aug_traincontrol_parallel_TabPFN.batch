@@ -7,11 +7,11 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
 #SBATCH --partition=gpu
-# SBATCH --gres=gpu:rtx8000:1
+#SBATCH --gres=gpu:1
 #SBATCH --exclude=gpu002,gpu003,gpu004,gpu011,gpu014
 
-# Submit from batch/ after creating logs/. One MC (both variants, all fractions)
-# per task avoids concurrent writers for the same context. Adjust %8 to capacity.
+# Submit from batch/ after creating logs/. Each task processes ten independent
+# MC replicates for TabPFN-naive. Adjust %8 to cluster capacity.
 set -eo pipefail
 module purge
 source /home/$USER/.bashrc
@@ -20,14 +20,21 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
+N_SAMPLES="${N_SAMPLES:-600}"
+N_GENERATED="${N_GENERATED:-50}"
 ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}}"
 MC_START=$((SLURM_ARRAY_TASK_ID * 10 + 1))
 cd "$PROJECT_ROOT"
+
+echo "host=${HOSTNAME} job=${SLURM_JOB_ID} task=${SLURM_ARRAY_TASK_ID}"
+echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+nvidia-smi -L
+
 python3 script/simulation_generate_aug_traincontrol_parallel_TabPFN.py \
   --mc-start "$MC_START" \
   --n-mc 10 \
-  --n-samples 600 \
-  --n-generated-dataset 50 \
+  --n-samples "$N_SAMPLES" \
+  --n-generated-dataset "$N_GENERATED" \
   --generators TabPFN-naive \
   --device cuda \
   --output-dir "$ARCHIVE_ROOT"

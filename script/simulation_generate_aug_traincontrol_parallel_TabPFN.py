@@ -6,6 +6,7 @@ See simulation_two_stage.md for timing, batching limitations, and Slurm examples
 import argparse
 from importlib.metadata import PackageNotFoundError, version
 import json
+import os
 from pathlib import Path
 from time import perf_counter
 
@@ -59,6 +60,25 @@ def positive_int(value):
     return result
 
 
+def validate_requested_device(device):
+    """Fail before simulation when an explicitly requested CUDA device is absent."""
+    if device is None or not device.lower().startswith('cuda'):
+        return
+    import torch
+    if torch.cuda.is_available():
+        return
+    allocation = {
+        name: os.environ.get(name, '<unset>')
+        for name in ('SLURM_JOB_ID', 'SLURM_JOB_GPUS', 'CUDA_VISIBLE_DEVICES')
+    }
+    raise RuntimeError(
+        f'--device {device} was requested, but torch.cuda.is_available() is False. '
+        f'Slurm/CUDA environment: {allocation}. Ensure the batch directive is '
+        "exactly '#SBATCH --gres=gpu:1' (no space between # and SBATCH), "
+        'then verify nvidia-smi and the CUDA-enabled PyTorch environment.'
+    )
+
+
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument('--mc-start', type=positive_int, default=1)
@@ -82,6 +102,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     if len(set(args.generators)) != len(args.generators):
         raise ValueError('Generator names must be unique.')
+    validate_requested_device(args.device)
     config = make_config(args)
     parameters = {}
     for generator in args.generators:
