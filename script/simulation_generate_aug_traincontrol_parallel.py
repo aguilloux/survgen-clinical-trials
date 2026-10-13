@@ -106,6 +106,39 @@ def verify(path, expected):
             raise ValueError(f'Configuration mismatch in {path}; use a separate --output-dir.')
 
 
+def generated_to_numpy(dataset, columns):
+    """Convert supported generator outputs to a numeric array in canonical order.
+
+    HI-VAE and TabPFN return tensors, while Synthcity's Surv-GAN and Surv-VAE
+    return SurvivalAnalysisDataLoader objects.  Avoid importing Synthcity here:
+    its loaders expose ``dataframe()``, which also lets us enforce column order.
+    """
+    import numpy as np
+    import pandas as pd
+    import torch
+
+    if torch.is_tensor(dataset):
+        return dataset.detach().cpu().numpy()
+    if isinstance(dataset, pd.DataFrame):
+        frame = dataset
+    elif callable(getattr(dataset, 'dataframe', None)):
+        frame = dataset.dataframe()
+    else:
+        converter = getattr(dataset, 'numpy', None)
+        if callable(converter):
+            return np.asarray(converter())
+        raise TypeError(
+            f'Unsupported generated dataset type {type(dataset).__module__}.'
+            f'{type(dataset).__qualname__}; expected a tensor, DataFrame, '
+            'Synthcity dataloader, or object exposing numpy().'
+        )
+
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f'Generated dataset is missing columns: {missing}')
+    return frame.loc[:, columns].to_numpy()
+
+
 def generate_one(config, seed, fraction_index, generators, best_params, output, runner=None):
     """Persist one context; an optional runner supplies another generator family.
 
@@ -184,7 +217,10 @@ def generate_one(config, seed, fraction_index, generators, best_params, output, 
                     tensor, columns=list(decoded.columns[:-1]), target_column='censor',
                     time_to_event_column='time', n_generated_dataset=config['n_generated_dataset'],
                     n_generated_sample=max(len(treated), len(control)), params=params)
-            values = np.stack([data.detach().cpu().numpy() for data in generated])
+            generated_columns = list(decoded.columns[:-1])
+            values = np.stack([
+                generated_to_numpy(data, generated_columns) for data in generated
+            ])
             expected_shape = (config['n_generated_dataset'], max(len(treated), len(control)), len(control.columns))
             if values.shape != expected_shape:
                 raise ValueError(f'{generator}: expected {expected_shape}, received {values.shape}')
