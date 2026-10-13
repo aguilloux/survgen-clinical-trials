@@ -1,0 +1,33 @@
+#!/bin/bash
+#SBATCH --job-name=sim_TabPFN_generate
+#SBATCH --output=logs/sim_TabPFN_generate_%A_%a.out
+#SBATCH --error=logs/sim_TabPFN_generate_%A_%a.err
+#SBATCH --array=0-99%8
+#SBATCH --cpus-per-task=8
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+# SBATCH --gres=gpu:rtx8000:1
+#SBATCH --exclude=gpu002,gpu003,gpu004,gpu011,gpu014
+
+# Submit from batch/ after creating logs/. One MC (both variants, all fractions)
+# per task avoids concurrent writers for the same context. Adjust %8 to capacity.
+set -eo pipefail
+module purge
+source /home/$USER/.bashrc
+source activate hivae
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}}"
+MC_START=$((SLURM_ARRAY_TASK_ID * 10 + 1))
+cd "$PROJECT_ROOT"
+python3 script/simulation_generate_aug_traincontrol_parallel_TabPFN.py \
+  --mc-start "$MC_START" \
+  --n-mc 10 \
+  --n-samples 600 \
+  --n-generated-dataset 50 \
+  --generators TabPFN-naive \
+  --device cuda \
+  --output-dir "$ARCHIVE_ROOT"
