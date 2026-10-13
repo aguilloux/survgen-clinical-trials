@@ -24,4 +24,4 @@ MC_START=$((SLURM_ARRAY_TASK_ID * 50 + 1))
 cd "$PROJECT_ROOT"
 python3 script/simulation_generate_aug_traincontrol_parallel.py \
   --mc-start "$MC_START" --n-mc 50 --n-samples "$N_SAMPLES" \
-  --n-generated-dataset "$N_GENERATED" --device cuda --output-dir "$ARCHIVE_ROOT"
+  --n-generated-dataset "$N_GENERATED" --output-dir "$ARCHIVE_ROOT"
