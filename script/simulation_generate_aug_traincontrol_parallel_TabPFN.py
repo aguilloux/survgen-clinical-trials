@@ -65,6 +65,8 @@ def parser():
     result.add_argument('--n-mc', type=positive_int, default=5)
     result.add_argument('--n-samples', type=positive_int, default=1200)
     result.add_argument('--n-generated-dataset', type=positive_int, default=200)
+    result.add_argument('--control-fractions', nargs='+', type=float, default=[1., 2/3, 1/3],
+                        help='Fractions of the simulated control group used for generation.')
     result.add_argument('--treatment-effects', nargs='+', type=float)
     result.add_argument('--generators', nargs='+', choices=list(TABPFN_MODES), default=list(TABPFN_MODES))
     result.add_argument('--output-dir', type=Path, default=DEFAULT_DATASET / 'generated_two_stage')

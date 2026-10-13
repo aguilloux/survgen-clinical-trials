@@ -200,6 +200,8 @@ def parser():
     result.add_argument('--n-mc', type=int, default=50, help='Number of independent real-data replicates.')
     result.add_argument('--n-generated-dataset', type=int, default=200)
     result.add_argument('--n-samples', type=int, default=600)
+    result.add_argument('--control-fractions', nargs='+', type=float, default=[1/3],
+                        help='Fractions of the simulated control group used for training.')
     result.add_argument('--generators', nargs='+', choices=GENERATORS, default=DEFAULT_GENERATORS)
     result.add_argument('--treatment-effects', nargs='+', type=float, default=None)
     result.add_argument('--params-dir', type=Path, default=DEFAULT_DATASET / 'optuna_results')
@@ -225,12 +227,14 @@ def make_config(args):
         treatment_effect_hyperopt=0.,
         metric_optuna='detection_xgb',
         n_trials=150,
-        control_fractions=[1/3], # [1., 2/3, 1/3],
+        control_fractions=args.control_fractions,
         treatment_effects=args.treatment_effects if args.treatment_effects is not None else np.arange(0., 1.1, 0.2).tolist(),
         n_generated_dataset=args.n_generated_dataset)
 
     if not all(np.isfinite(config['treatment_effects'])):
         raise ValueError('Treatment effects must be finite.')
+    if not all(0 < fraction <= 1 for fraction in config['control_fractions']):
+        raise ValueError('Control fractions must be in (0, 1].')
     return config
 
 
