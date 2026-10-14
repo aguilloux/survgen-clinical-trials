@@ -11,7 +11,6 @@
 #SBATCH --exclude=gpu002,gpu003,gpu004,gpu011,gpu014
 
 # Submit from batch/ after creating logs/. Each task processes ten independent
-# MC replicates for TabPFN-naive. Adjust %8 to cluster capacity.
 set -eo pipefail
 module purge
 source /home/$USER/.bashrc
@@ -22,7 +21,8 @@ export TRANSFORMERS_OFFLINE=1
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
 N_SAMPLES="${N_SAMPLES:-600}"
 N_GENERATED="${N_GENERATED:-50}"
-ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}}"
+# CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
 MC_START=$((SLURM_ARRAY_TASK_ID * 10 + 1))
 cd "$PROJECT_ROOT"
 
@@ -38,3 +38,4 @@ python3 script/simulation_generate_aug_traincontrol_parallel_TabPFN.py \
   --generators TabPFN-naive \
   --device cuda \
   --output-dir "$ARCHIVE_ROOT"
+    # --control-fractions "$CONTROL_FRACTION" \
