@@ -99,11 +99,63 @@ def metadata(archive):
     return json.loads(str(archive['metadata']))
 
 
-def verify(path, expected):
+class ConfigurationMismatch(ValueError):
+    """An existing archive belongs to another experiment configuration."""
+
+
+def archive_complete(path, expected, required=(), expected_data_shape=None):
+    """Return whether an existing archive is complete enough to be resumed.
+
+    Configuration mismatches remain hard errors because replacing an archive
+    from another experiment would silently mix results. Corrupt or incomplete
+    archives are safe to regenerate because ``atomic_npz`` replaces them only
+    after the new archive has been written successfully.
+    """
+    import numpy as np
+    if not path.exists():
+        return False
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            if metadata(archive) != expected:
+                raise ConfigurationMismatch(
+                    f'Configuration mismatch in {path}; use a separate --output-dir.')
+            missing = [name for name in required if name not in archive.files]
+            if missing:
+                raise KeyError(f'missing arrays {missing}')
+            if expected_data_shape is not None and archive['data'].shape != expected_data_shape:
+                raise ValueError(
+                    f"data has shape {archive['data'].shape}, expected {expected_data_shape}")
+    except ConfigurationMismatch:
+        raise
+    except Exception as error:
+        print(f'Regenerating incomplete archive {path}: {error}', flush=True)
+        return False
+    return True
+
+
+def reference_requirements(n_treatment_effects):
+    required = [
+        'columns', 'control', 'control_dtypes', 'raw_control_dtypes',
+        'raw_columns', 'raw_control', 'feature_types',
+    ]
+    for index in range(n_treatment_effects):
+        required.extend([
+            f'treated_{index}', f'treated_{index}_dtypes',
+            f'raw_treated_{index}', f'raw_treated_{index}_dtypes',
+        ])
+    return required
+
+
+def generated_shape_from_reference(path, count):
+    """Read the exact expected generator output shape from a reference archive."""
     import numpy as np
     with np.load(path, allow_pickle=False) as archive:
-        if metadata(archive) != expected:
-            raise ValueError(f'Configuration mismatch in {path}; use a separate --output-dir.')
+        sample_size = max(
+            len(archive['raw_control']),
+            *(len(archive[f'raw_treated_{index}'])
+              for index in range(len(metadata(archive)['config']['treatment_effects'])))
+        )
+        return count, sample_size, len(archive['columns']) - 1
 
 
 def generated_to_numpy(dataset, columns):
@@ -152,17 +204,20 @@ def generate_one(config, seed, fraction_index, generators, best_params, output, 
     reference = destination / 'reference.npz'
     meta = {'schema_version': 1, 'config': config, 'mc_seed': seed,
             'fraction_index': fraction_index}
-    if reference.exists():
-        verify(reference, meta)
-    pending = []
-    for generator in generators:
-        path = destination / (generator + '.npz')
-        expected = dict(meta, generator=generator, params=best_params[generator])
-        if path.exists():
-            verify(path, expected)
-        else:
-            pending.append(generator)
-    if reference.exists() and not pending:
+    reference_complete = archive_complete(
+        reference, meta, reference_requirements(len(config['treatment_effects'])))
+    pending = None
+    if reference_complete:
+        expected_shape = generated_shape_from_reference(
+            reference, config['n_generated_dataset'])
+        pending = [
+            generator for generator in generators
+            if not archive_complete(
+                destination / (generator + '.npz'),
+                dict(meta, generator=generator, params=best_params[generator]),
+                required=('data',), expected_data_shape=expected_shape)
+        ]
+    if reference_complete and not pending:
         print(f'Skipping complete MC {seed}, control fraction {fraction}', flush=True)
         return
     with private_workspace() as work:
@@ -175,7 +230,7 @@ def generate_one(config, seed, fraction_index, generators, best_params, output, 
         # Build and persist reference datasets before training. Model wrappers reset their
         # own RNGs; restore the simulation state as well to preserve their input state.
         simulation_rng = rng_arrays()
-        if not reference.exists():
+        if not reference_complete:
             arrays = dict(metadata=json.dumps(meta), columns=np.asarray(decoded.columns, dtype=str),
                           control=decoded.to_numpy(),
                           control_dtypes=np.asarray(decoded.dtypes.astype(str), dtype=str),
@@ -194,6 +249,15 @@ def generate_one(config, seed, fraction_index, generators, best_params, output, 
                 arrays[f'raw_treated_{t}'] = raw_treated.to_numpy()
             atomic_npz(reference, **arrays)
         restore_rng(simulation_rng)
+        expected_shape = (config['n_generated_dataset'], max(len(treated), len(control)), len(control.columns))
+        if pending is None:
+            pending = [
+                generator for generator in generators
+                if not archive_complete(
+                    destination / (generator + '.npz'),
+                    dict(meta, generator=generator, params=best_params[generator]),
+                    required=('data',), expected_data_shape=expected_shape)
+            ]
         for generator in pending:
             print(f'Generating MC {seed}, control fraction {fraction}, {generator}', flush=True)
             params = dict(best_params[generator])
@@ -221,7 +285,6 @@ def generate_one(config, seed, fraction_index, generators, best_params, output, 
             values = np.stack([
                 generated_to_numpy(data, generated_columns) for data in generated
             ])
-            expected_shape = (config['n_generated_dataset'], max(len(treated), len(control)), len(control.columns))
             if values.shape != expected_shape:
                 raise ValueError(f'{generator}: expected {expected_shape}, received {values.shape}')
             atomic_npz(destination / (generator + '.npz'), data=values,

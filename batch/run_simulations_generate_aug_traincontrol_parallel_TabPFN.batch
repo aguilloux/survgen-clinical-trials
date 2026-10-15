@@ -10,7 +10,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --exclude=gpu002,gpu003,gpu004,gpu011,gpu014
 
-# Submit from batch/ after creating logs/. Each task processes ten independent
+# Submit from batch/ after creating logs/. Each task checks ten independent MCs;
+# complete archives are skipped and missing/incomplete archives are regenerated.
 set -eo pipefail
 module purge
 source /home/$USER/.bashrc
@@ -21,21 +22,24 @@ export TRANSFORMERS_OFFLINE=1
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
 N_SAMPLES="${N_SAMPLES:-600}"
 N_GENERATED="${N_GENERATED:-50}"
-# CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
+N_MC_PER_TASK="${N_MC_PER_TASK:-10}"
+CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
 ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
-MC_START=$((SLURM_ARRAY_TASK_ID * 10 + 1))
+MC_START=$((SLURM_ARRAY_TASK_ID * N_MC_PER_TASK + 1))
+MC_END=$((MC_START + N_MC_PER_TASK - 1))
 cd "$PROJECT_ROOT"
 
 echo "host=${HOSTNAME} job=${SLURM_JOB_ID} task=${SLURM_ARRAY_TASK_ID}"
 echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+echo "Checking MC ${MC_START}-${MC_END}; complete archives will be skipped"
 nvidia-smi -L
 
 python3 script/simulation_generate_aug_traincontrol_parallel_TabPFN.py \
   --mc-start "$MC_START" \
-  --n-mc 10 \
+  --n-mc "$N_MC_PER_TASK" \
   --n-samples "$N_SAMPLES" \
   --n-generated-dataset "$N_GENERATED" \
+  --control-fractions "$CONTROL_FRACTION" \
   --generators TabPFN-naive \
   --device cuda \
   --output-dir "$ARCHIVE_ROOT"
-    # --control-fractions "$CONTROL_FRACTION" \

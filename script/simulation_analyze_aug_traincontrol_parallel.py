@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 
 from simulation_generate_aug_traincontrol_parallel import (
-    DEFAULT_DATASET, DEFAULT_GENERATORS, GENERATORS, metadata, private_workspace,
+    DEFAULT_DATASET, GENERATORS, metadata, private_workspace,
     restore_rng, simulation_kwargs,
 )
 
@@ -133,7 +133,10 @@ def analyze_one(reference_path, generators):
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument('--input-dir', type=Path, default=DEFAULT_DATASET / 'generated_two_stage')
-    result.add_argument('--generators', nargs='+', choices=ANALYSIS_GENERATORS, default=DEFAULT_GENERATORS)
+    result.add_argument(
+        '--generators', nargs='+', choices=ANALYSIS_GENERATORS,
+        help='Generators to analyze. Omit to discover every supported generator in the first MC archive.',
+    )
     result.add_argument('--mc-start', type=int, default=1)
     result.add_argument('--n-mc', type=int, default=10)
     result.add_argument('--output', type=Path, required=True, help='Destination CSV (atomically replaced on success).')
@@ -144,13 +147,26 @@ def main(argv=None):
     args = parser().parse_args(argv)
     if min(args.mc_start, args.n_mc) < 1:
         raise ValueError('MC start and count must be positive.')
-    if len(set(args.generators)) != len(args.generators):
+    if args.generators is not None and len(set(args.generators)) != len(args.generators):
         raise ValueError('Generator names must be unique.')
     import numpy as np
     root = args.input_dir.resolve()
     first = root / f'MC_{args.mc_start:06d}' / 'control_0' / 'reference.npz'
     with np.load(first, allow_pickle=False) as archive:
         config = metadata(archive)['config']
+    if args.generators is None:
+        generators = [
+            generator for generator in ANALYSIS_GENERATORS
+            if (first.parent / f'{generator}.npz').is_file()
+        ]
+        if not generators:
+            raise FileNotFoundError(
+                f'No supported generator archives were found in {first.parent}. '
+                'Pass --generators explicitly or check --input-dir.'
+            )
+        print(f'Discovered generators: {generators}', flush=True)
+    else:
+        generators = args.generators
     references = []
     # Validate the whole requested range before expensive metrics; never silently omit failures.
     for d in range(len(config['control_fractions'])):
@@ -160,7 +176,7 @@ def main(argv=None):
             with np.load(path, allow_pickle=False) as archive:
                 if metadata(archive) != expected:
                     raise ValueError(f'Incompatible simulation configuration: {path}')
-            for generator in args.generators:
+            for generator in generators:
                 generated_path = path.parent / (generator + '.npz')
                 with np.load(generated_path, allow_pickle=False) as archive:
                     info = metadata(archive)
@@ -176,7 +192,7 @@ def main(argv=None):
             offset = 0
             for path in references:
                 print(f'Analyzing {path.parent}', flush=True)
-                result = analyze_one(path, args.generators)
+                result = analyze_one(path, generators)
                 result.index = range(offset, offset + len(result))
                 result.to_csv(stream, header=offset == 0)
                 offset += len(result)
