@@ -42,6 +42,55 @@ def load_frame(archive, key, columns):
         dict(zip(columns, archive[key + '_dtypes'].tolist())))
 
 
+def procova_baselines(control, treated, p_treated, prognostic_score=None):
+    """Compute the notebook's covariate-adjusted tests on the real trial arms.
+
+    All returned values use the analysis CSV's negative-log-p-value convention.
+    The prognostic score is cross-fitted once and shared by its log-rank and Cox
+    tests; their score construction is otherwise identical in ``metrics.py``.
+    """
+    import numpy as np
+    import pandas as pd
+    from metrics import (
+        compute_adjusted_logrank_test, compute_martingale_score,
+        cox_adjusted_pvalue, martingale_score_adjusted_pvalue,
+        prognostic_adjusted_logrank,
+    )
+
+    control = control.copy()
+    treated = treated.copy()
+    control['treatment'] = 0
+    treated['treatment'] = 1
+    trial = pd.concat([control, treated], ignore_index=True)
+    covariates = [
+        column for column in trial.columns
+        if column not in ('time', 'censor', 'treatment')
+    ]
+    # Preserve the original tutorial calls: the Ye-style test receives the
+    # configured assignment probability, while the prognostic variant uses its
+    # default observed treatment fraction.
+    adjusted = compute_adjusted_logrank_test(
+        trial, covariates, return_details=True,
+        p_trt=p_treated)
+    if prognostic_score is None:
+        prognostic_score = compute_martingale_score(trial, covariates)
+    prognostic_logrank = prognostic_adjusted_logrank(
+        trial, covariates, prognostic_score=prognostic_score)
+    cox_pvalue = cox_adjusted_pvalue(trial, covariates)
+    prognostic_cox_pvalue = martingale_score_adjusted_pvalue(
+        trial, covariates, prognostic_score=prognostic_score)
+
+    def negative_log(p_value):
+        return float(-np.log(np.clip(p_value, np.finfo(float).tiny, 1.0)))
+
+    return {
+        'log_pvalue_adjusted_logrank_init': adjusted['neg_log_p'],
+        'log_pvalue_prog_adjusted_logrank_init': prognostic_logrank['log_pvalue'],
+        'log_pvalue_cox_wald_x_init': negative_log(cox_pvalue),
+        'log_pvalue_cox_wald_prog_init': negative_log(prognostic_cox_pvalue),
+    }, prognostic_score
+
+
 def analyze_one(reference_path, generators):
     import numpy as np
     import pandas as pd
@@ -90,6 +139,8 @@ def analyze_one(reference_path, generators):
             # This comparison is invariant across treatment effects (sixfold saving by default).
             control_logrank[generator] = [compute_logrank_test(frame, raw_control) for frame in frames]
         rows = []
+        cached_prognostic_score = None
+        cached_treated_covariates = None
         for t, effect in enumerate(effects):
             # Legacy true_univ_coef draws its seed from the ambient NumPy RNG.
             # Subsequent effects start from the state left by the treated simulation.
@@ -100,6 +151,21 @@ def analyze_one(reference_path, generators):
             treated = load_frame(ref, f'treated_{t}', columns)
             treated['treatment'] = 1
             raw_treated = load_frame(ref, f'raw_treated_{t}', raw_columns)
+            covariate_columns = [
+                column for column in raw_columns if column not in ('time', 'censor')
+            ]
+            treated_covariates = raw_treated[covariate_columns].to_numpy()
+            reusable_score = (
+                cached_prognostic_score
+                if cached_treated_covariates is not None
+                and np.array_equal(treated_covariates, cached_treated_covariates)
+                else None
+            )
+            procova, prognostic_score = procova_baselines(
+                raw_control, raw_treated, config['p_treated'], reusable_score)
+            if reusable_score is None:
+                cached_prognostic_score = prognostic_score
+                cached_treated_covariates = treated_covariates.copy()
             cox_columns = ['time', 'censor', 'treatment']
             coef, _, _, se = fit_cox_model(pd.concat([control, treated], ignore_index=True), cox_columns)
             result = pd.DataFrame({
@@ -111,6 +177,7 @@ def analyze_one(reference_path, generators):
                 'est_cox_coef_init': coef[0], 'est_cox_coef_se_init': se[0],
                 # Explicit clustering keys: synthetic draws from one model are not independent MC runs.
                 'MC_seed': seed, 'synthetic_id': np.arange(count),
+                **procova,
             })
             additions = {}
             for generator in generators:

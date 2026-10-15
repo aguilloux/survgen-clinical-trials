@@ -251,11 +251,14 @@ def compute_adjusted_logrank_test(data, covariates, return_details=False,
 
 
 def prognostic_adjusted_logrank(data, covariates, n_splits=5,
-                                seed=42, tau=None, p_trt=None):
+                                seed=42, tau=None, p_trt=None,
+                                prognostic_score=None):
     """Cross-fitted prognostic-score adjusted log-rank test on one RCT.
 
     Train martingale-residual models using controls only.
     Returns z, p_value, log_pvalue, prognostic_score, unadjusted_z.
+    A precomputed score may be supplied when another test uses the identical
+    cross-fitting specification.
     """
     # ---- Validate data
     covariates = list(covariates)
@@ -314,30 +317,35 @@ def prognostic_adjusted_logrank(data, covariates, n_splits=5,
         return e - hazard
 
     # ---- Cross-fitted prognostic score
-    score = np.full(n, np.nan)
-    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    if prognostic_score is None:
+        score = np.full(n, np.nan)
+        kfold = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
 
-    for train_fold, test_fold in kfold.split(control_idx):
-        train_idx = control_idx[train_fold]
-        test_idx = control_idx[test_fold]
+        for train_fold, test_fold in kfold.split(control_idx):
+            train_idx = control_idx[train_fold]
+            test_idx = control_idx[test_fold]
 
-        residual = martingale_residual(train_idx)
+            residual = martingale_residual(train_idx)
+            model = RandomForestRegressor(
+                n_estimators=200, min_samples_leaf=5,
+                random_state=seed, n_jobs=-1
+            )
+            model.fit(x[train_idx], residual)
+
+            score[test_idx] = model.predict(x[test_idx])
+
+        # Predict treated patients using a control-trained model.
+        residual = martingale_residual(control_idx)
         model = RandomForestRegressor(
             n_estimators=200, min_samples_leaf=5,
             random_state=seed, n_jobs=-1
         )
-        model.fit(x[train_idx], residual)
-
-        score[test_idx] = model.predict(x[test_idx])
-
-    # ---- Predict treated patients using a control-trained model
-    residual = martingale_residual(control_idx)
-    model = RandomForestRegressor(
-        n_estimators=200, min_samples_leaf=5,
-        random_state=seed, n_jobs=-1
-    )
-    model.fit(x[control_idx], residual)
-    score[treated_idx] = model.predict(x[treated_idx])
+        model.fit(x[control_idx], residual)
+        score[treated_idx] = model.predict(x[treated_idx])
+    else:
+        score = np.asarray(prognostic_score, dtype=float)
+        if score.shape != (n,):
+            raise ValueError(f'Expected {n} prognostic scores, received {score.shape}.')
 
     if not np.isfinite(score).all():
         raise ValueError('Non-finite prognostic scores.')
@@ -491,13 +499,18 @@ def compute_martingale_score(df, covariates, n_splits=5, seed=42, tau=None):
 
 # ---------- 4. Prognostic-score-adjusted Cox Wald test ----------
 def martingale_score_adjusted_pvalue(
-    df, covariates, n_splits=5, seed=42, tau=None
+    df, covariates, n_splits=5, seed=42, tau=None, prognostic_score=None
 ):
     df = df.copy().reset_index(drop=True)
 
-    df["prognostic_score"] = compute_martingale_score(
-        df, covariates, n_splits=n_splits, seed=seed, tau=tau
-    )
+    if prognostic_score is None:
+        prognostic_score = compute_martingale_score(
+            df, covariates, n_splits=n_splits, seed=seed, tau=tau
+        )
+    prognostic_score = np.asarray(prognostic_score, dtype=float)
+    if prognostic_score.shape != (len(df),) or not np.isfinite(prognostic_score).all():
+        raise ValueError('Invalid prognostic scores.')
+    df["prognostic_score"] = prognostic_score
 
     model = CoxPHFitter(penalizer=0.0)
     model.fit(
