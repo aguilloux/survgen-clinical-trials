@@ -16,6 +16,10 @@ import pandas as pd
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, roc_curve
+from scipy.stats import norm
+from sklearn.model_selection import KFold
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
 
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from lifelines import CoxPHFitter
@@ -127,6 +131,383 @@ def strata_log_rank(data_init, data_syn, strata):
     ]
 
     return logrank_init, np.array(logrank_syn)
+
+def compute_adjusted_logrank_test(data, covariates, return_details=False,
+                                  time_col='time', event_col='censor',
+                                  treatment_col='treatment', p_trt=None):
+    """Covariate-adjusted log-rank test (Ye et al., 2024).
+
+    Returns -log(two-sided p-value), or a dictionary of diagnostics.
+    p_trt is the planned treatment allocation probability; defaults to
+    the observed fraction. Assumes baseline covariates, independent
+    censoring within treatment arms, and simple randomization.
+    """
+    # ---- Validate input
+    covariates = list(covariates)
+    cols = [time_col, event_col, treatment_col] + covariates
+
+    if not covariates or len(cols) != len(set(cols)):
+        raise ValueError('Covariates must be nonempty and column names distinct.')
+
+    d = data.loc[:, cols].copy()
+    if d.isna().any().any():
+        raise ValueError('Missing values are not supported.')
+
+    t = d[time_col].to_numpy(dtype=float)
+    e = d[event_col].to_numpy(dtype=int)
+    w = d[treatment_col].to_numpy(dtype=int)
+    x = d[covariates].to_numpy(dtype=float)
+    n, p = x.shape
+
+    if n < 4 or not np.all(np.isfinite(t)) or np.any(t < 0):
+        raise ValueError('Invalid follow-up times or insufficient observations.')
+
+    if not np.all(np.isin(e, [0, 1])) or not np.all(np.isin(w, [0, 1])):
+        raise ValueError('Event and treatment indicators must be binary.')
+
+    if not np.all(np.isfinite(x)) or min(np.bincount(w, minlength=2)) <= p:
+        raise ValueError('Invalid covariates or insufficient patients per arm.')
+
+    pi = float(w.mean() if p_trt is None else p_trt)
+    if not 0 < pi < 1:
+        raise ValueError('p_trt must lie strictly between 0 and 1.')
+
+    # ---- Classical log-rank and individual signed contributions
+    q = np.zeros(n)
+    u, v = 0.0, 0.0
+
+    for tj in np.unique(t[e == 1]):
+        risk = t >= tj
+        event = (t == tj) & (e == 1)
+
+        y = int(risk.sum())
+        y1 = int(np.sum(risk & (w == 1)))
+        y0 = y - y1
+        dj = int(event.sum())
+        d1 = int(np.sum(event & (w == 1)))
+
+        frac = y1 / y
+        u += d1 - dj * frac
+        v += y1 * y0 * dj / (y * y)
+
+        q[event] += w[event] - frac
+        q[risk] -= (w[risk] - frac) * dj / y
+
+    if v <= 0:
+        raise ValueError('Log-rank variance is zero.')
+
+    # ---- Arm-specific OLS on unsigned pseudo-outcomes
+    x_centered = x - x.mean(axis=0)
+    beta = []
+
+    for arm in (0, 1):
+        mask = w == arm
+        xa = x[mask] - x[mask].mean(axis=0)
+
+        # q is signed: control pseudo-outcomes require sign reversal.
+        outcome = q[mask] if arm == 1 else -q[mask]
+        outcome = outcome - outcome.mean()
+
+        if np.linalg.matrix_rank(xa) < p:
+            raise ValueError(f'Covariate matrix is rank-deficient in arm {arm}.')
+
+        model = Ridge(alpha=10.0, fit_intercept=True)
+        model.fit(xa, outcome)
+        beta.append(model.coef_)
+
+    # ---- Adjust numerator and variance
+    beta_sum = beta[0] + beta[1]
+    imbalance = (w - pi) @ x_centered
+
+    u_adj = u - imbalance @ beta_sum
+    sigma_x = x_centered.T @ x_centered / n
+    reduction = n * pi * (1 - pi) * (beta_sum @ sigma_x @ beta_sum)
+    v_adj = v - reduction
+
+    if v_adj <= 0:
+        raise ValueError('Non-positive adjusted variance.')
+
+    # ---- Test statistic and two-sided p-value
+    z = u_adj / np.sqrt(v_adj)
+    log_p = np.log(2.0) + norm.logsf(abs(z))
+
+    details = dict(
+        statistic=float(z),
+        p_value=float(np.exp(log_p)),
+        neg_log_p=float(-log_p),
+        U=float(u_adj),
+        variance=float(v_adj),
+        se=float(np.sqrt(v_adj)),
+        U_unadjusted=float(u),
+        variance_unadjusted=float(v),
+        variance_reduction=float(reduction),
+        n=n,
+        n_events=int(e.sum()),
+        n_control=int(np.sum(w == 0)),
+        n_treated=int(np.sum(w == 1))
+    )
+
+    return details if return_details else details['neg_log_p']
+
+
+def prognostic_adjusted_logrank(data, covariates, n_splits=5,
+                                seed=42, tau=None, p_trt=None):
+    """Cross-fitted prognostic-score adjusted log-rank test on one RCT.
+
+    Train martingale-residual models using controls only.
+    Returns z, p_value, log_pvalue, prognostic_score, unadjusted_z.
+    """
+    # ---- Validate data
+    covariates = list(covariates)
+    cols = ['time', 'censor', 'treatment'] + covariates
+    df = data[cols].copy().reset_index(drop=True)
+
+    if not covariates or df.isna().any().any():
+        raise ValueError('Invalid covariates or missing values.')
+
+    time = df['time'].to_numpy(dtype=float)
+    event = df['censor'].to_numpy(dtype=int)
+    treatment = df['treatment'].to_numpy(dtype=int)
+    x = df[covariates].to_numpy(dtype=float)
+    n = len(df)
+
+    if not np.isfinite(time).all() or np.any(time <= 0):
+        raise ValueError('Invalid follow-up times.')
+    if not np.isfinite(x).all() or not np.isin(event, [0, 1]).all():
+        raise ValueError('Invalid covariates or event indicators.')
+    if not np.isin(treatment, [0, 1]).all():
+        raise ValueError('Treatment must be binary.')
+    if tau is not None and (not np.isfinite(tau) or tau <= 0):
+        raise ValueError('tau must be positive.')
+
+    control_idx = np.flatnonzero(treatment == 0)
+    treated_idx = np.flatnonzero(treatment == 1)
+
+    if n_splits < 2 or len(control_idx) < n_splits or len(treated_idx) < 2:
+        raise ValueError('Insufficient patients for cross-fitting.')
+
+    pi = float(treatment.mean() if p_trt is None else p_trt)
+    if not 0 < pi < 1:
+        raise ValueError('Invalid treatment probability.')
+
+    # ---- Nelson-Aalen martingale residuals
+    def martingale_residual(indices):
+        t = time[indices].copy()
+        e = event[indices].copy()
+
+        if tau is not None:
+            e = e * (t <= tau)
+            t = np.minimum(t, tau)
+
+        event_times = np.unique(t[e == 1])
+        increments = np.array([
+            np.sum((t == tj) & (e == 1)) / np.sum(t >= tj)
+            for tj in event_times
+        ])
+
+        cumulative_hazard = np.cumsum(increments)
+        positions = np.searchsorted(event_times, t, side='right') - 1
+        hazard = np.zeros(len(t))
+        valid = positions >= 0
+        hazard[valid] = cumulative_hazard[positions[valid]]
+
+        return e - hazard
+
+    # ---- Cross-fitted prognostic score
+    score = np.full(n, np.nan)
+    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    for train_fold, test_fold in kfold.split(control_idx):
+        train_idx = control_idx[train_fold]
+        test_idx = control_idx[test_fold]
+
+        residual = martingale_residual(train_idx)
+        model = RandomForestRegressor(
+            n_estimators=200, min_samples_leaf=5,
+            random_state=seed, n_jobs=-1
+        )
+        model.fit(x[train_idx], residual)
+
+        score[test_idx] = model.predict(x[test_idx])
+
+    # ---- Predict treated patients using a control-trained model
+    residual = martingale_residual(control_idx)
+    model = RandomForestRegressor(
+        n_estimators=200, min_samples_leaf=5,
+        random_state=seed, n_jobs=-1
+    )
+    model.fit(x[control_idx], residual)
+    score[treated_idx] = model.predict(x[treated_idx])
+
+    if not np.isfinite(score).all():
+        raise ValueError('Non-finite prognostic scores.')
+
+    # ---- Classical log-rank and individual signed contributions
+    q = np.zeros(n)
+    u, v = 0.0, 0.0
+
+    for tj in np.unique(time[event == 1]):
+        risk = time >= tj
+        occurred = (time == tj) & (event == 1)
+
+        y = int(risk.sum())
+        y1 = int(np.sum(risk & (treatment == 1)))
+        y0 = y - y1
+        dj = int(occurred.sum())
+        d1 = int(np.sum(occurred & (treatment == 1)))
+
+        frac = y1 / y
+        u += d1 - dj * frac
+        v += y1 * y0 * dj / (y * y)
+
+        q[occurred] += treatment[occurred] - frac
+        q[risk] -= (treatment[risk] - frac) * dj / y
+
+    if v <= 0:
+        raise ValueError('Non-positive log-rank variance.')
+
+    # ---- Arm-specific regression on prognostic score
+    beta = []
+
+    for arm in (0, 1):
+        mask = treatment == arm
+        xa = score[mask] - score[mask].mean()
+        outcome = q[mask] if arm == 1 else -q[mask]
+        outcome = outcome - outcome.mean()
+
+        denominator = np.dot(xa, xa)
+        beta.append(np.dot(xa, outcome) / denominator if denominator > 1e-12 else 0.0)
+
+    # ---- Covariate-adjusted log-rank statistic
+    beta_sum = beta[0] + beta[1]
+    centered = score - score.mean()
+    imbalance = np.dot(treatment - pi, centered)
+
+    u_adj = u - imbalance * beta_sum
+    reduction = n * pi * (1 - pi) * beta_sum**2 * np.mean(centered**2)
+    v_adj = v - reduction
+
+    if v_adj <= 0:
+        raise ValueError('Non-positive adjusted variance.')
+
+    z = u_adj / np.sqrt(v_adj)
+    log_p = np.log(2.0) + norm.logsf(abs(z))
+
+    return {
+        'z': float(z),
+        'p_value': float(np.exp(log_p)),
+        'log_pvalue': float(-log_p),
+        'prognostic_score': score,
+        'unadjusted_z': float(u / np.sqrt(v)),
+        'variance_reduction': float(reduction / v)
+    }
+
+# ---------- 1. Covariate-adjusted Cox Wald test ----------
+def cox_adjusted_pvalue(df, covariates):
+    columns = ["time", "censor", "treatment"] + list(covariates)
+
+    model = CoxPHFitter(penalizer=0.0)
+    model.fit(
+        df[columns],
+        duration_col="time",
+        event_col="censor"
+    )
+
+    return float(model.summary.loc["treatment", "p"])
+
+
+# ---------- 2. Nelson-Aalen martingale residuals ----------
+def compute_martingale_residuals(time, event, tau=None):
+    time = np.asarray(time, dtype=float).copy()
+    event = np.asarray(event, dtype=int).copy()
+
+    if tau is not None:
+        event = event * (time <= tau)
+        time = np.minimum(time, tau)
+
+    event_times = np.unique(time[event == 1])
+    increments = np.array([
+        np.sum((time == t) & (event == 1)) / np.sum(time >= t)
+        for t in event_times
+    ])
+
+    cumulative_hazard = np.cumsum(increments)
+    positions = np.searchsorted(event_times, time, side="right") - 1
+
+    hazard = np.zeros(len(time))
+    valid = positions >= 0
+    hazard[valid] = cumulative_hazard[positions[valid]]
+
+    return event - hazard
+
+
+# ---------- 3. Cross-fitted prognostic score ----------
+def compute_martingale_score(df, covariates, n_splits=5, seed=42, tau=None):
+    df = df.reset_index(drop=True)
+    covariates = list(covariates)
+
+    time = df["time"].to_numpy(dtype=float)
+    event = df["censor"].to_numpy(dtype=int)
+    treatment = df["treatment"].to_numpy(dtype=int)
+    x = df[covariates].to_numpy(dtype=float)
+
+    control_idx = np.flatnonzero(treatment == 0)
+    treated_idx = np.flatnonzero(treatment == 1)
+
+    if n_splits < 2 or len(control_idx) < n_splits:
+        raise ValueError("Insufficient controls for cross-fitting.")
+
+    scores = np.full(len(df), np.nan)
+
+    def fit_model(indices):
+        residuals = compute_martingale_residuals(
+            time[indices], event[indices], tau=tau
+        )
+        model = RandomForestRegressor(
+            n_estimators=200,
+            min_samples_leaf=5,
+            random_state=seed,
+            n_jobs=-1
+        )
+        model.fit(x[indices], residuals)
+        return model
+
+    # ---- Out-of-fold predictions for controls
+    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    for train_fold, test_fold in kfold.split(control_idx):
+        train_idx = control_idx[train_fold]
+        test_idx = control_idx[test_fold]
+
+        model = fit_model(train_idx)
+        scores[test_idx] = model.predict(x[test_idx])
+
+    # ---- Predictions for treated patients
+    model = fit_model(control_idx)
+    scores[treated_idx] = model.predict(x[treated_idx])
+
+    return scores
+
+
+# ---------- 4. Prognostic-score-adjusted Cox Wald test ----------
+def martingale_score_adjusted_pvalue(
+    df, covariates, n_splits=5, seed=42, tau=None
+):
+    df = df.copy().reset_index(drop=True)
+
+    df["prognostic_score"] = compute_martingale_score(
+        df, covariates, n_splits=n_splits, seed=seed, tau=tau
+    )
+
+    model = CoxPHFitter(penalizer=0.0)
+    model.fit(
+        df[["time", "censor", "treatment", "prognostic_score"]],
+        duration_col="time",
+        event_col="censor"
+    )
+
+    return float(model.summary.loc["treatment", "p"])
+
 
 def fit_cox_model(data, columns, strata=None):
     """
