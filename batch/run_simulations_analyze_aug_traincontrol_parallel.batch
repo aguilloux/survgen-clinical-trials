@@ -6,6 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
+#SBATCH --partition=gpu
 
 # Universal analysis batch for HI-VAE, Surv-GAN, Surv-VAE and TabPFN archives.
 # The Python script discovers all supported generator .npz files in ARCHIVE_ROOT.
