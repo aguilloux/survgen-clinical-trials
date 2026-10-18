@@ -2,7 +2,7 @@
 #SBATCH --job-name=sim_analyze
 #SBATCH --output=logs/sim_analyze_%A_%a.out
 #SBATCH --error=logs/sim_analyze_%A_%a.err
-#SBATCH --array=4,6,9,34,36,38-41,44,46,48-58,60-63,65,66,69-71,76,82,85,87,89,90,91,93,97,98,99
+#SBATCH --array=36,78
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
