@@ -1,15 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=sim_analyze
-#SBATCH --output=logs/sim_analyze_%A_%a.out
-#SBATCH --error=logs/sim_analyze_%A_%a.err
-#SBATCH --array=36,78
+#SBATCH --job-name=sim_TabPFN_analyze
+#SBATCH --output=logs/sim_TabPFN_analyze_%A_%a.out
+#SBATCH --error=logs/sim_TabPFN_analyze_%A_%a.err
+#SBATCH --array=0-99
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
 #SBATCH --partition=gpu
 
-# Universal analysis batch for HI-VAE, Surv-GAN, Surv-VAE and TabPFN archives.
-# The Python script discovers all supported generator .npz files in ARCHIVE_ROOT.
+# Analyze only TabPFN archives; keep these results separate from other generators.
 # Override ARCHIVE_ROOT/RESULT_ROOT when analyzing another generation run.
 set -eo pipefail
 module purge
@@ -19,8 +18,8 @@ source activate hivae
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
 N_SAMPLES="${N_SAMPLES:-600}"
 N_MC_PER_TASK="${N_MC_PER_TASK:-10}"
-ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_N${N_SAMPLES}}"
-RESULT_ROOT="${RESULT_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/results_two_stage_N${N_SAMPLES}}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+RESULT_ROOT="${RESULT_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/results_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
 MC_START=$((SLURM_ARRAY_TASK_ID * N_MC_PER_TASK + 1))
 MC_END=$((MC_START + N_MC_PER_TASK - 1))
 
@@ -30,4 +29,5 @@ python3 script/simulation_analyze_aug_traincontrol_parallel.py \
   --mc-start "$MC_START" \
   --n-mc "$N_MC_PER_TASK" \
   --input-dir "$ARCHIVE_ROOT" \
+  --generators TabPFN-naive \
   --output "${RESULT_ROOT}/results_MC_${MC_START}to${MC_END}.csv"
