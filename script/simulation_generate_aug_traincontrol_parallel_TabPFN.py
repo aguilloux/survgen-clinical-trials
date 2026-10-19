@@ -28,6 +28,7 @@ def run_tabpfn(generator, tensor, columns, feature_types, count, sample_size, pa
     options = dict(params)
     mode = options.pop('mode')
     rounding = options.pop('apply_rounding')
+    condition = options.pop('cond_gen', None)
     diagnostics = {'generation_retries': 0}
     started = perf_counter()
     generated = surv_tabpfn.run(
@@ -38,7 +39,7 @@ def run_tabpfn(generator, tensor, columns, feature_types, count, sample_size, pa
         n_generated_dataset=count, 
         n_generated_sample=sample_size,
         params=options, feat_types_dict=feature_types, apply_rounding=rounding,
-        mode=mode, profile=diagnostics)
+        mode=mode, profile=diagnostics, cond_gen=condition)
     diagnostics['total_seconds'] = perf_counter() - started
     diagnostics['seconds_per_synthetic_dataset'] = diagnostics['total_seconds'] / count
     diagnostics['versions'] = {}

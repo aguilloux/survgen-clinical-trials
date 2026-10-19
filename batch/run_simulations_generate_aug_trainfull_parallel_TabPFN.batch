@@ -1,0 +1,48 @@
+#!/bin/bash
+#SBATCH --job-name=sim_TabPFN_trainfull
+#SBATCH --output=logs/sim_TabPFN_trainfull_%A_%a.out
+#SBATCH --error=logs/sim_TabPFN_trainfull_%A_%a.err
+#SBATCH --array=1-100
+#SBATCH --cpus-per-task=8
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --exclude=gpu002,gpu003,gpu004,gpu011,gpu014
+
+# Submit from batch/ after creating logs/. Each task handles one MC seed and
+# loops over treatment effects, writing each effect to its own archive directory.
+set -eo pipefail
+module purge
+source /home/$USER/.bashrc
+source activate hivae
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
+N_SAMPLES="${N_SAMPLES:-3000}"
+N_GENERATED="${N_GENERATED:-50}"
+CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
+TREATMENT_EFFECTS="${TREATMENT_EFFECTS:-0 0.2 0.4 0.6 0.8 1.0}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_trainfull/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+MC_START="${SLURM_ARRAY_TASK_ID}"
+
+read -r -a TREATMENT_EFFECT_LIST <<< "$TREATMENT_EFFECTS"
+read -r -a GENERATOR_LIST <<< "$GENERATORS"
+
+cd "$PROJECT_ROOT"
+echo "host=${HOSTNAME} job=${SLURM_JOB_ID} task=${SLURM_ARRAY_TASK_ID}"
+echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+echo "Generating MC ${MC_START}; effects: ${TREATMENT_EFFECTS}; generators: ${GENERATORS}"
+nvidia-smi -L
+
+python3 script/simulation_generate_aug_trainfull_parallel_TabPFN.py \
+  --mc-start "$MC_START" \
+  --n-mc 1 \
+  --n-samples "$N_SAMPLES" \
+  --n-generated-dataset "$N_GENERATED" \
+  --control-fractions "$CONTROL_FRACTION" \
+  --treatment-effects "${TREATMENT_EFFECT_LIST[@]}" \
+  --generators TabPFN-naive \
+  --device cuda \
+  --output-dir "$ARCHIVE_ROOT"

@@ -120,6 +120,46 @@ def _generate_once(model, n_samples, params, profile=None):
                 raise
 
 
+def _condition_first(columns, params):
+    """Put the observed condition before every column to be imputed."""
+    condition = params.get('_condition')
+    if condition is None:
+        return list(columns)
+    name = condition['var']
+    return [name] + [column for column in columns if column != name]
+
+
+def _generate_conditioned(model, n_samples, params, columns, profile=None):
+    """Sample missing columns with the categorical condition fixed from the start.
+
+    Use the same sequential imputation backend as generate_synthetic_data, but
+    seed its first column with the condition. Every later feature conditions on
+    this column and previously sampled features (no rejection or relabeling).
+    """
+    condition = params.get('_condition')
+    if condition is None:
+        return _generate_once(model, n_samples, params, profile)
+    if columns[0] != condition['var']:
+        raise ValueError('The conditioning column must be first in the fitted model.')
+    for attempt in range(params.get('max_generate_attempts', 5)):
+        query = torch.full((n_samples, len(columns)), float('nan'))
+        query[:, 0] = condition['value']
+        try:
+            out = model.impute_(
+                query, t=params.get('t', 1.0),
+                n_permutations=params.get('n_permutations', 3),
+                condition_on_all_features=False,
+            )
+            if out.shape != query.shape or not bool((out[:, 0] == condition['value']).all()):
+                raise RuntimeError('TabPFN imputation did not preserve the fixed condition.')
+            return out
+        except TabPFNValidationError:
+            if profile is not None:
+                profile['generation_retries'] = profile.get('generation_retries', 0) + 1
+            if attempt == params.get('max_generate_attempts', 5) - 1:
+                raise
+
+
 # ---------------------------------------------------------------------------
 # Time-to-event model for mode="survival_function"
 # ---------------------------------------------------------------------------
@@ -514,8 +554,9 @@ def _run_naive(df, columns, target_column, time_to_event_column, cat_indices,
 
     started = perf_counter()
     model = _build_unsupervised_model(params)
-    model.set_categorical_features(cat_indices)
-    model.fit(df)
+    fit_columns = _condition_first(columns, params)
+    model.set_categorical_features([fit_columns.index(columns[i]) for i in cat_indices])
+    model.fit(df[fit_columns])
     _record_time(profile, 'context_setup_seconds', started)
 
     started = perf_counter()
@@ -524,7 +565,8 @@ def _run_naive(df, columns, target_column, time_to_event_column, cat_indices,
     est_data_gen = []
     for _ in range(n_generated_dataset):
         started = perf_counter()
-        out = _generate_once(model, n_generated_sample, params, profile)
+        out = _generate_conditioned(model, n_generated_sample, params, fit_columns, profile)
+        out = out[:, [fit_columns.index(name) for name in columns]]
         _record_time(profile, 'tabpfn_sampling_seconds', started)
         started = perf_counter()
         out[:, target_idx] = out[:, target_idx].round().clamp(0, 1)
@@ -592,6 +634,7 @@ def _run_survival_function(df, columns, target_column, time_to_event_column, cat
     # Covariates-only joint fit (+ the event column for censoring_strategy="joint").
     cov_columns = list(Xcov.columns)
     fit_columns = cov_columns + [target_column] if censoring_strategy == 'joint' else cov_columns
+    fit_columns = _condition_first(fit_columns, params)
     fit_cat_indices = [fit_columns.index(columns[i]) for i in cat_indices if columns[i] in fit_columns]
     started = perf_counter()
     model = _build_unsupervised_model(params)
@@ -605,7 +648,7 @@ def _run_survival_function(df, columns, target_column, time_to_event_column, cat
     est_data_gen = []
     for _ in range(n_generated_dataset):
         started = perf_counter()
-        sampled = _generate_once(model, n_generated_sample, params, profile)
+        sampled = _generate_conditioned(model, n_generated_sample, params, fit_columns, profile)
         _record_time(profile, 'tabpfn_sampling_seconds', started)
         started = perf_counter()
         gen_df = pd.DataFrame(sampled.detach().cpu().numpy(), columns=fit_columns)
@@ -686,9 +729,10 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
     profile : dict, optional
         Filled with wall-clock stage timings and retry counts. Does not change
         random draws. Survival-mode postprocessing includes TTE prediction.
-    cond_gen : not supported
-        TabPFNUnsupervisedModel has no native conditional-generation API.
-        Passing a non-None value raises NotImplementedError.
+    cond_gen : dict, optional
+        Categorical covariate condition, e.g. {'var': 'treatment', 'value': 0}.
+        Fixes this column before sequentially imputing all other columns using
+        the fitted joint model. The condition is also retained for TTE prediction.
     apply_rounding : bool, default=False
         If True, round generated columns onto the real-data precision grid
         via `data_processing.round_data_gen` (unchanged, reused as-is).
@@ -706,21 +750,27 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         (n_generated_sample, len(columns)), columns in the same order as
         `columns`.
     """
-    if cond_gen is not None:
-        raise NotImplementedError(
-            "TabPFNUnsupervisedModel has no native conditional-generation API; "
-            "cond_gen is not supported."
-        )
     if mode not in _MODES:
         raise ValueError(f"Unknown mode {mode!r}, expected one of {_MODES}")
 
     set_seed()
-    params = params or {}
+    params = dict(params or {})
 
     df = pd.DataFrame(data.numpy(), columns=columns)  # Preprocessed dataset
     if n_generated_sample is None:
         n_generated_sample = df.shape[0]
     cat_indices = _categorical_indices(columns, target_column, feat_types_dict)
+    if cond_gen is not None:
+        if not isinstance(cond_gen, dict) or set(cond_gen) != {'var', 'value'}:
+            raise ValueError("cond_gen must contain exactly 'var' and 'value'.")
+        name, value = cond_gen['var'], cond_gen['value']
+        if name not in columns or name in (target_column, time_to_event_column):
+            raise ValueError('Condition must name a categorical covariate.')
+        if columns.index(name) not in cat_indices or not (df[name] == value).any():
+            raise ValueError('Condition must select an observed categorical value.')
+        if mode == 'survival_function' and params.get('censoring_strategy', 'random') == 'random':
+            raise ValueError('Conditional survival generation requires joint, covariate_dependent, or competing_times censoring.')
+        params['_condition'] = dict(cond_gen)
 
     runner = _run_naive if mode == 'naive' else _run_survival_function
     return runner(df, columns, target_column, time_to_event_column, cat_indices,
