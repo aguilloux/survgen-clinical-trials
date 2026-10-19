@@ -2,7 +2,7 @@
 #SBATCH --job-name=sim_generate
 #SBATCH --output=logs/sim_generate_%A_%a.out
 #SBATCH --error=logs/sim_generate_%A_%a.err
-#SBATCH --array=994
+#SBATCH --array=1-100
 # SBATCH --array=19 #%8
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
@@ -18,12 +18,15 @@ source /home/$USER/.bashrc
 source activate hivae
 
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
-N_SAMPLES="${N_SAMPLES:-600}"
+N_SAMPLES="${N_SAMPLES:-3000}"
 N_GENERATED="${N_GENERATED:-200}"
 ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_N${N_SAMPLES}}"
 # MC_START=$((SLURM_ARRAY_TASK_ID * 50 + 1))
 MC_START=$((SLURM_ARRAY_TASK_ID))
+GENERATORS="${GENERATORS:-HI-VAE_weibull HI-VAE_piecewise HI-VAE_weibull_prior HI-VAE_piecewise_prior}"
+read -r -a GENERATOR_LIST <<< "$GENERATORS"
 cd "$PROJECT_ROOT"
 python3 script/simulation_generate_aug_traincontrol_parallel.py \
   --mc-start "$MC_START" --n-mc 1 --n-samples "$N_SAMPLES" \
-  --n-generated-dataset "$N_GENERATED" --output-dir "$ARCHIVE_ROOT"
+  --n-generated-dataset "$N_GENERATED" --output-dir "$ARCHIVE_ROOT" \
+  --generators "${GENERATOR_LIST[@]}"
