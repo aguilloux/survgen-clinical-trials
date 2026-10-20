@@ -349,7 +349,8 @@ def main(argv=None):
     # Preflight every parameter file before any expensive training.
     parameters = []
     for fraction in config['control_fractions']:
-        name = f'simu_N{args.n_samples}_Ncontrol{int(fraction * 3 + 0.01)}%3_nfeat6_t0'
+        # name = f'simu_N{args.n_samples}_Ncontrol{int(fraction * 3 + 0.01)}%3_nfeat6_t0'
+        name = f'simu_N600_Ncontrol{int(fraction * 3 + 0.01)}%3_nfeat6_t0'
         by_generator = {}
         for generator in args.generators:
             path = args.params_dir / f'best_params_{name}_ntrials150_detection_xgb_{generator}.json'
