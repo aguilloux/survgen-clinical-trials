@@ -138,62 +138,116 @@ def analyze_one(reference_path, generators):
                 raise ValueError(f'Unexpected metric row count for {generator}')
             # This comparison is invariant across treatment effects (sixfold saving by default).
             control_logrank[generator] = [compute_logrank_test(frame, raw_control) for frame in frames]
-        rows = []
-        cached_prognostic_score = None
-        cached_treated_covariates = None
-        for t, effect in enumerate(effects):
-            # Legacy true_univ_coef draws its seed from the ambient NumPy RNG.
-            # Subsequent effects start from the state left by the treated simulation.
-            if t:
-                restore_rng(ref, f'treated_rng_{t - 1}')
-            reference_seed = int(np.random.randint(1000))
-            coef_true = reference_coefficient(effect, reference_seed, json.dumps(config, sort_keys=True))
-            treated = load_frame(ref, f'treated_{t}', columns)
-            treated['treatment'] = 1
-            raw_treated = load_frame(ref, f'raw_treated_{t}', raw_columns)
-            covariate_columns = [
-                column for column in raw_columns if column not in ('time', 'censor')
-            ]
-            treated_covariates = raw_treated[covariate_columns].to_numpy()
-            reusable_score = (
-                cached_prognostic_score
-                if cached_treated_covariates is not None
-                and np.array_equal(treated_covariates, cached_treated_covariates)
-                else None
+    # Restore the full control-arm size with synthetic controls for experiment D.
+    # Use a generator-specific, synthetic-draw-specific seed so results are stable
+    # and independent of the analysis RNG state.
+    raw_treated_for_size = load_frame(ref, 'raw_treated_0', raw_columns)
+    synthetic_control_count = max(0, len(raw_treated_for_size) - len(raw_control))
+    real_control_decoded = control.drop(columns=['treatment']).copy()
+    augmented_controls = {}
+    for generator_index, generator in enumerate(generators):
+        augmented_controls[generator] = []
+        for synthetic_id, frame in enumerate(generated[generator]):
+            synthetic_control = frame.drop(columns=['treatment']).copy()
+            if synthetic_control_count > len(synthetic_control):
+                raise ValueError(
+                    f'{generator} generated {len(synthetic_control)} controls, '
+                    f'but D requires {synthetic_control_count}.'
+                )
+            rng = np.random.default_rng(
+                np.random.SeedSequence([seed, d, generator_index, synthetic_id])
             )
-            procova, prognostic_score = procova_baselines(
-                raw_control, raw_treated, config['p_treated'], reusable_score)
-            if reusable_score is None:
-                cached_prognostic_score = prognostic_score
-                cached_treated_covariates = treated_covariates.copy()
-            cox_columns = ['time', 'censor', 'treatment']
-            coef, _, _, se = fit_cox_model(pd.concat([control, treated], ignore_index=True), cox_columns)
-            result = pd.DataFrame({
-                'XP_num': (seed - 1) * len(effects) * len(config['control_fractions']) + d * len(effects) + t,
-                'D_control': raw_control['censor'].sum() * (len(raw_treated) / len(raw_control)),
-                'D_treated': raw_treated['censor'].sum(), 'H0_coef_univ': coef_true,
-                'H0_coef': effect, 'aug_perc': config['control_fractions'][d],
-                'log_pvalue_init': compute_logrank_test(control, treated),
-                'est_cox_coef_init': coef[0], 'est_cox_coef_se_init': se[0],
-                # Explicit clustering keys: synthetic draws from one model are not independent MC runs.
-                'MC_seed': seed, 'synthetic_id': np.arange(count),
-                **procova,
-            })
-            additions = {}
-            for generator in generators:
-                logrank, coefficients, errors = [], [], []
-                for frame in generated[generator]:
-                    logrank.append(compute_logrank_test(frame, raw_treated))
-                    coef, _, _, se = fit_cox_model(pd.concat([frame, treated], ignore_index=True), cox_columns)
-                    coefficients.append(coef[0])
-                    errors.append(se[0])
-                additions[f'log_pvalue_{generator}'] = logrank
-                additions[f'log_pvalue_control_{generator}'] = control_logrank[generator]
-                additions[f'est_cox_coef_{generator}'] = coefficients
-                additions[f'est_cox_coef_se_{generator}'] = errors
-                for metric in METRICS:
-                    additions[f'{metric}_{generator}'] = scores[generator][metric].to_numpy()
-            rows.append(pd.concat([result, pd.DataFrame(additions)], axis=1))
+            selected = rng.choice(len(synthetic_control), size=synthetic_control_count,
+                                  replace=False)
+            augmented_controls[generator].append(pd.concat(
+                [real_control_decoded, synthetic_control.iloc[selected]],
+                ignore_index=True,
+            ))
+    rows = []
+    cached_prognostic_score = None
+    cached_treated_covariates = None
+    d_prognostic_scores = {generator: [None] * count for generator in generators}
+    d_treated_covariates_cache = {generator: [None] * count for generator in generators}
+    for t, effect in enumerate(effects):
+        # Legacy true_univ_coef draws its seed from the ambient NumPy RNG.
+        # Subsequent effects start from the state left by the treated simulation.
+        if t:
+            restore_rng(ref, f'treated_rng_{t - 1}')
+        reference_seed = int(np.random.randint(1000))
+        coef_true = reference_coefficient(effect, reference_seed, json.dumps(config, sort_keys=True))
+        treated = load_frame(ref, f'treated_{t}', columns)
+        treated['treatment'] = 1
+        raw_treated = load_frame(ref, f'raw_treated_{t}', raw_columns)
+        d_treated = treated.drop(columns=['treatment']).copy()
+        d_treated_covariates = d_treated.drop(columns=['time', 'censor']).to_numpy()
+        covariate_columns = [
+            column for column in raw_columns if column not in ('time', 'censor')
+        ]
+        treated_covariates = raw_treated[covariate_columns].to_numpy()
+        reusable_score = (
+            cached_prognostic_score
+            if cached_treated_covariates is not None
+            and np.array_equal(treated_covariates, cached_treated_covariates)
+            else None
+        )
+        procova, prognostic_score = procova_baselines(
+            raw_control, raw_treated, config['p_treated'], reusable_score)
+        if reusable_score is None:
+            cached_prognostic_score = prognostic_score
+            cached_treated_covariates = treated_covariates.copy()
+        cox_columns = ['time', 'censor', 'treatment']
+        coef, _, _, se = fit_cox_model(pd.concat([control, treated], ignore_index=True), cox_columns)
+        result = pd.DataFrame({
+            'XP_num': (seed - 1) * len(effects) * len(config['control_fractions']) + d * len(effects) + t,
+            'D_control': raw_control['censor'].sum() * (len(raw_treated) / len(raw_control)),
+            'D_treated': raw_treated['censor'].sum(), 'H0_coef_univ': coef_true,
+            'H0_coef': effect, 'aug_perc': config['control_fractions'][d],
+            'log_pvalue_init': compute_logrank_test(control, treated),
+            'est_cox_coef_init': coef[0], 'est_cox_coef_se_init': se[0],
+            # Explicit clustering keys: synthetic draws from one model are not independent MC runs.
+            'MC_seed': seed, 'synthetic_id': np.arange(count),
+            **procova,
+        })
+        additions = {}
+        for generator in generators:
+            logrank, coefficients, errors = [], [], []
+            d_adjusted_logrank = []
+            d_prognostic_logrank = []
+            d_cox_wald = []
+            d_prognostic_cox_wald = []
+            for synthetic_id, frame in enumerate(generated[generator]):
+                logrank.append(compute_logrank_test(frame, raw_treated))
+                coef, _, _, se = fit_cox_model(pd.concat([frame, treated], ignore_index=True), cox_columns)
+                coefficients.append(coef[0])
+                errors.append(se[0])
+                reusable_d_score = d_prognostic_scores[generator][synthetic_id]
+                cached_d_covariates = d_treated_covariates_cache[generator][synthetic_id]
+                if (cached_d_covariates is not None
+                        and not np.array_equal(cached_d_covariates, d_treated_covariates)):
+                    reusable_d_score = None
+                procova_d, d_score = procova_baselines(
+                    augmented_controls[generator][synthetic_id], d_treated,
+                    config['p_treated'], reusable_d_score)
+                if reusable_d_score is None:
+                    d_prognostic_scores[generator][synthetic_id] = d_score
+                    d_treated_covariates_cache[generator][synthetic_id] = (
+                        d_treated_covariates.copy()
+                    )
+                d_adjusted_logrank.append(procova_d['log_pvalue_adjusted_logrank_init'])
+                d_prognostic_logrank.append(procova_d['log_pvalue_prog_adjusted_logrank_init'])
+                d_cox_wald.append(procova_d['log_pvalue_cox_wald_x_init'])
+                d_prognostic_cox_wald.append(procova_d['log_pvalue_cox_wald_prog_init'])
+            additions[f'log_pvalue_{generator}'] = logrank
+            additions[f'log_pvalue_control_{generator}'] = control_logrank[generator]
+            additions[f'est_cox_coef_{generator}'] = coefficients
+            additions[f'est_cox_coef_se_{generator}'] = errors
+            additions[f'log_pvalue_adjusted_logrank_D_{generator}'] = d_adjusted_logrank
+            additions[f'log_pvalue_prog_adjusted_logrank_D_{generator}'] = d_prognostic_logrank
+            additions[f'log_pvalue_cox_wald_x_D_{generator}'] = d_cox_wald
+            additions[f'log_pvalue_cox_wald_prog_D_{generator}'] = d_prognostic_cox_wald
+            for metric in METRICS:
+                additions[f'{metric}_{generator}'] = scores[generator][metric].to_numpy()
+        rows.append(pd.concat([result, pd.DataFrame(additions)], axis=1))
     return pd.concat(rows, ignore_index=True)
 
 

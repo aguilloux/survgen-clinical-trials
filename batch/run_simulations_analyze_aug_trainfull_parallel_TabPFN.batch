@@ -1,0 +1,48 @@
+#!/bin/bash
+#SBATCH --job-name=sim_TabPFN_trainfull_analyze
+#SBATCH --output=logs/sim_TabPFN_trainfull_analyze_%A_%a.out
+#SBATCH --error=logs/sim_TabPFN_trainfull_analyze_%A_%a.err
+#SBATCH --array=0-9
+#SBATCH --cpus-per-task=8
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+
+# Submit from batch/ after creating logs/. Each task analyzes one MC seed
+# across all treatment-effect archives, keeping outputs separate by effect.
+set -eo pipefail
+module purge
+source /home/$USER/.bashrc
+source activate hivae
+
+PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
+N_SAMPLES="${N_SAMPLES:-3000}"
+N_MC_PER_TASK="${N_MC_PER_TASK:-10}"
+CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
+TREATMENT_EFFECTS="${TREATMENT_EFFECTS:-0 0.2 0.4 0.6 0.8 1.0}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_trainfull/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+RESULT_ROOT="${RESULT_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_trainfull/results_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+MC_START=$((SLURM_ARRAY_TASK_ID * N_MC_PER_TASK + 1))
+MC_END=$((MC_START + N_MC_PER_TASK - 1))
+read -r -a TREATMENT_EFFECT_LIST <<< "$TREATMENT_EFFECTS"
+
+cd "$PROJECT_ROOT"
+echo "Analyzing MC ${MC_START}-${MC_END}; effects: ${TREATMENT_EFFECTS}"
+
+for effect_index in "${!TREATMENT_EFFECT_LIST[@]}"; do
+  EFFECT_ROOT="${ARCHIVE_ROOT}/effect_${effect_index}"
+  EFFECT_RESULT_ROOT="${RESULT_ROOT}/effect_${effect_index}"
+  REFERENCE="${EFFECT_ROOT}/MC_$(printf '%06d' "$MC_START")/control_0/reference.npz"
+  if [[ ! -f "$REFERENCE" ]]; then
+    echo "Missing expected archive: ${REFERENCE}" >&2
+    exit 1
+  fi
+
+  echo "Analyzing effect index ${effect_index} (${TREATMENT_EFFECT_LIST[$effect_index]}) from ${EFFECT_ROOT}"
+  python3 script/simulation_analyze_aug_traincontrol_parallel.py \
+    --mc-start "$MC_START" \
+    --n-mc "$N_MC_PER_TASK" \
+    --input-dir "$EFFECT_ROOT" \
+    --generators TabPFN-naive \
+    --output "${EFFECT_RESULT_ROOT}/results_MC_${MC_START}to${MC_END}.csv"
+done
