@@ -19,7 +19,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
 N_SAMPLES="${N_SAMPLES:-600}"
 N_MC_PER_TASK="${N_MC_PER_TASK:-20}"
 ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
-RESULT_ROOT="${RESULT_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/results_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+RESULT_ROOT="${RESULT_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/results_two_stage_TabPFN_N${N_SAMPLES}_control1of3_bis}"
 MC_START=$((SLURM_ARRAY_TASK_ID * N_MC_PER_TASK + 1))
 MC_END=$((MC_START + N_MC_PER_TASK - 1))
 
