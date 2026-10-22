@@ -42,7 +42,8 @@ def load_frame(archive, key, columns):
         dict(zip(columns, archive[key + '_dtypes'].tolist())))
 
 
-def procova_baselines(control, treated, p_treated, prognostic_score=None):
+def procova_baselines(control, treated, p_treated, prognostic_score=None,
+                      allow_cox_convergence_failure=False):
     """Compute the notebook's covariate-adjusted tests on the real trial arms.
 
     All returned values use the analysis CSV's negative-log-p-value convention.
@@ -51,6 +52,7 @@ def procova_baselines(control, treated, p_treated, prognostic_score=None):
     """
     import numpy as np
     import pandas as pd
+    import warnings
     from metrics import (
         compute_adjusted_logrank_test, compute_martingale_score,
         cox_adjusted_pvalue, martingale_score_adjusted_pvalue,
@@ -76,9 +78,30 @@ def procova_baselines(control, treated, p_treated, prognostic_score=None):
         prognostic_score = compute_martingale_score(trial, covariates)
     prognostic_logrank = prognostic_adjusted_logrank(
         trial, covariates, prognostic_score=prognostic_score)
-    cox_pvalue = cox_adjusted_pvalue(trial, covariates)
-    prognostic_cox_pvalue = martingale_score_adjusted_pvalue(
-        trial, covariates, prognostic_score=prognostic_score)
+    def fit_cox_pvalue(fit):
+        try:
+            return fit()
+        except Exception as error:
+            if not allow_cox_convergence_failure:
+                raise
+            try:
+                from lifelines.exceptions import ConvergenceError
+            except ImportError:
+                raise error
+            if not isinstance(error, ConvergenceError):
+                raise
+            warnings.warn(
+                'A Cox test did not converge for an augmented-control analysis; '
+                'saving its p-value as NaN.',
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return float('nan')
+
+    cox_pvalue = fit_cox_pvalue(lambda: cox_adjusted_pvalue(trial, covariates))
+    prognostic_cox_pvalue = fit_cox_pvalue(
+        lambda: martingale_score_adjusted_pvalue(
+            trial, covariates, prognostic_score=prognostic_score))
 
     def negative_log(p_value):
         return float(-np.log(np.clip(p_value, np.finfo(float).tiny, 1.0)))
@@ -227,7 +250,8 @@ def analyze_one(reference_path, generators):
                     reusable_d_score = None
                 procova_d, d_score = procova_baselines(
                     augmented_controls[generator][synthetic_id], d_treated,
-                    config['p_treated'], reusable_d_score)
+                    config['p_treated'], reusable_d_score,
+                    allow_cox_convergence_failure=True)
                 if reusable_d_score is None:
                     d_prognostic_scores[generator][synthetic_id] = d_score
                     d_treated_covariates_cache[generator][synthetic_id] = (
