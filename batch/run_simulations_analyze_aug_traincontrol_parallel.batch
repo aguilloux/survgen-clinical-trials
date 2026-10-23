@@ -29,5 +29,5 @@ python3 script/simulation_analyze_aug_traincontrol_parallel.py \
   --mc-start "$MC_START" \
   --n-mc "$N_MC_PER_TASK" \
   --input-dir "$ARCHIVE_ROOT" \
-  --output "${RESULT_ROOT}/results_MC_${MC_START}to${MC_END}.csv" 
-  # --generators TabPFN-naive \
+  --output "${RESULT_ROOT}/results_MC_${MC_START}to${MC_END}.csv" \
+  --generators TabPFN-naive \
