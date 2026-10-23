@@ -44,12 +44,15 @@ def load_frame(archive, key, columns):
 
 
 def procova_baselines(control, treated, p_treated, prognostic_score=None,
-                      allow_cox_convergence_failure=False):
+                      allow_cox_convergence_failure=False,
+                      allow_adjusted_variance_failure=False, diagnostic_context=None):
     """Compute the notebook's covariate-adjusted tests on the real trial arms.
 
     All returned values use the analysis CSV's negative-log-p-value convention.
     The prognostic score is cross-fitted once and shared by its log-rank and Cox
     tests; their score construction is otherwise identical in ``metrics.py``.
+    Synthetic-arm analyses may opt into recording an undefined adjusted
+    log-rank variance as NaN, without suppressing other validation errors.
     """
     from metrics import (
         compute_adjusted_logrank_test, compute_martingale_score,
@@ -69,9 +72,22 @@ def procova_baselines(control, treated, p_treated, prognostic_score=None,
     # Preserve the original tutorial calls: the Ye-style test receives the
     # configured assignment probability, while the prognostic variant uses its
     # default observed treatment fraction.
-    adjusted = compute_adjusted_logrank_test(
-        trial, covariates, return_details=True,
-        p_trt=p_treated)
+    try:
+        adjusted = compute_adjusted_logrank_test(
+            trial, covariates, return_details=True,
+            p_trt=p_treated)
+    except ValueError as error:
+        if (not allow_adjusted_variance_failure
+                or str(error) != 'Non-positive adjusted variance.'):
+            raise
+        context = f' ({diagnostic_context})' if diagnostic_context else ''
+        warnings.warn(
+            'Adjusted log-rank variance is non-positive' + context
+            + '; saving only this test as NaN. Other tests will still be computed.',
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        adjusted = {'neg_log_p': float('nan')}
     if prognostic_score is None:
         prognostic_score = compute_martingale_score(trial, covariates)
     prognostic_logrank = prognostic_adjusted_logrank(
@@ -267,7 +283,11 @@ def analyze_one(reference_path, generators):
                 procova_d, d_score = procova_baselines(
                     frame.drop(columns=['treatment']), treated.drop(columns=['treatment']),
                     config['p_treated'], reusable_d_score,
-                    allow_cox_convergence_failure=True)
+                    allow_cox_convergence_failure=True,
+                    allow_adjusted_variance_failure=True,
+                    diagnostic_context=(f'MC_seed={seed}, fraction_index={d}, '
+                                        f'generator={generator}, effect={effect}, '
+                                        f'synthetic_id={synthetic_id}'))
                 if reusable_d_score is None:
                     d_prognostic_scores[generator][synthetic_id] = d_score
                     d_treated_covariates_cache[generator][synthetic_id] = (d_treated_covariates.copy())
