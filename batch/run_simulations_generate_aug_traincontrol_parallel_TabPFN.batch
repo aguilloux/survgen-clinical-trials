@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sim_TabPFN_generate
-#SBATCH --output=logs/sim_TabPFN_generate_%A_%a.out
-#SBATCH --error=logs/sim_TabPFN_generate_%A_%a.err
+#SBATCH --job-name=sim_TabFORGE_generate
+#SBATCH --output=logs/sim_TabFORGE_generate_%A_%a.out
+#SBATCH --error=logs/sim_TabFORGE_generate_%A_%a.err
 #SBATCH --array=1-100
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
@@ -24,7 +24,7 @@ N_SAMPLES="${N_SAMPLES:-3000}"
 N_GENERATED="${N_GENERATED:-50}"
 # N_MC_PER_TASK="${N_MC_PER_TASK:-1}"
 CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
-ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabFORGE_N${N_SAMPLES}_control1of3}"
 MC_START=$((SLURM_ARRAY_TASK_ID)) # * N_MC_PER_TASK + 1))
 # MC_END=$((MC_START + N_MC_PER_TASK - 1))
 cd "$PROJECT_ROOT"
@@ -35,12 +35,12 @@ echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>} CUDA_VISIBLE_DEVICES=${CUDA_VISI
 echo "Checking MC ${MC_START}; complete archives will be skipped"
 nvidia-smi -L
 
-python3 script/simulation_generate_aug_traincontrol_parallel_TabPFN.py \
+python3 script/simulation_generate_aug_traincontrol_parallel_TabFORGE.py \
   --mc-start "$MC_START" \
   --n-mc 1 \
   --n-samples "$N_SAMPLES" \
   --n-generated-dataset "$N_GENERATED" \
   --control-fractions "$CONTROL_FRACTION" \
-  --generators TabPFN-naive \
+  --generators TabFORGE-naive \
   --device cuda \
   --output-dir "$ARCHIVE_ROOT"

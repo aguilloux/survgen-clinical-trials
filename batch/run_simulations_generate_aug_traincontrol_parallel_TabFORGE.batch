@@ -1,0 +1,51 @@
+#!/bin/bash
+#SBATCH --job-name=sim_TabFORGE_generate
+#SBATCH --output=logs/sim_TabFORGE_generate_%A_%a.out
+#SBATCH --error=logs/sim_TabFORGE_generate_%A_%a.err
+#SBATCH --array=1-5
+#SBATCH --cpus-per-task=8
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --exclude=gpu002,gpu003,gpu004,gpu011,gpu014
+
+# Submit from batch/ after creating logs/. Each task checks one independent MC;
+# complete archives are skipped and missing/incomplete archives are regenerated.
+set -eo pipefail
+module purge
+source /home/$USER/.bashrc
+source activate hivae
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
+N_SAMPLES="${N_SAMPLES:-3000}"
+N_GENERATED="${N_GENERATED:-50}"
+MAX_STEPS="${MAX_STEPS:-10000}"
+BATCH_SIZE="${BATCH_SIZE:-512}"
+CHECKPOINT="${CHECKPOINT:-None}"
+EMBEDDING_MODEL_PATH="${EMBEDDING_MODEL_PATH:-auto}"
+CONTROL_FRACTION="${CONTROL_FRACTION:-0.3333333333333333}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_TabFORGE_N${N_SAMPLES}_control1of3}"
+MC_START=$((SLURM_ARRAY_TASK_ID))
+cd "$PROJECT_ROOT"
+
+echo "host=${HOSTNAME} job=${SLURM_JOB_ID} task=${SLURM_ARRAY_TASK_ID}"
+echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+echo "Checking MC ${MC_START}; complete archives will be skipped"
+nvidia-smi -L
+
+python3 script/simulation_generate_aug_traincontrol_parallel_TabFORGE.py \
+  --mc-start "$MC_START" \
+  --n-mc 1 \
+  --n-samples "$N_SAMPLES" \
+  --n-generated-dataset "$N_GENERATED" \
+  --control-fractions "$CONTROL_FRACTION" \
+  --generators TabFORGE-naive \
+  --device cuda \
+  --max-steps "$MAX_STEPS" \
+  --batch-size "$BATCH_SIZE" \
+  --checkpoint "$CHECKPOINT" \
+  --embedding-model-path "$EMBEDDING_MODEL_PATH" \
+  --output-dir "$ARCHIVE_ROOT"
