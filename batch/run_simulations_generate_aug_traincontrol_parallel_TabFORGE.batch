@@ -2,7 +2,7 @@
 #SBATCH --job-name=sim_TabFORGE_generate
 #SBATCH --output=logs/sim_TabFORGE_generate_%A_%a.out
 #SBATCH --error=logs/sim_TabFORGE_generate_%A_%a.err
-#SBATCH --array=1-5
+#SBATCH --array=6-100
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=16G
