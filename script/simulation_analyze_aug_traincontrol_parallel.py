@@ -14,8 +14,9 @@ from simulation_generate_aug_traincontrol_parallel import (
 )
 
 from simulation_generate_aug_traincontrol_parallel_TabPFN import TABPFN_MODES
+from simulation_generate_aug_traincontrol_parallel_TabFORGE import MODES as TABFORGE_MODES
 
-ANALYSIS_GENERATORS = GENERATORS + list(TABPFN_MODES)
+ANALYSIS_GENERATORS = GENERATORS + list(TABPFN_MODES) + list(TABFORGE_MODES)
 
 METRICS = ['J-S distance', 'KS test', 'Survival curves distance', 'Detection XGB',
            'NNDR', 'K-map score', 'Identifiability score', 'TableOne min p-value']
