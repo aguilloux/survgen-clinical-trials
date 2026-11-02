@@ -48,7 +48,9 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
     The interface follows ``surv_tabpfn.run``. Input is decoded numeric data
     (not one-hot), with columns in expanded feature-descriptor order. The event
     indicator must be 0/1 and time positive. Only ``mode='naive'`` is supported;
-    conditional generation is not implemented and is explicitly rejected.
+    ``cond_gen={'var': column, 'value': value}`` uses TabFORGEImputer with
+    one trajectory per row, clamping that categorical column while sampling
+    all others. The condition must occur in the training data.
 
     ``params`` accepts ``random_state`` (default 1), ``checkpoint`` (default
     'pretrained'; None trains from scratch), ``detokeniser`` (default 'auto'),
@@ -65,8 +67,6 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
     """
     if mode != 'naive':
         raise ValueError("TabFORGE supports only mode='naive'.")
-    if cond_gen is not None:
-        raise NotImplementedError('Conditional TabFORGE generation is not implemented.')
     columns = list(columns)
     if len(set(columns)) != len(columns):
         raise ValueError('Column names must be unique.')
@@ -91,6 +91,14 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
             raise ValueError(f'{name} must be a positive integer.')
     categorical = _categorical_columns(columns, target_column, time_to_event_column,
                                        feat_types_dict)
+    if cond_gen is not None:
+        if not isinstance(cond_gen, dict) or set(cond_gen) != {'var', 'value'}:
+            raise ValueError('cond_gen requires exactly var and value.')
+        condition_column = cond_gen['var']
+        if condition_column not in categorical:
+            raise ValueError('The condition must name a categorical column.')
+        if not df[condition_column].eq(cond_gen['value']).any():
+            raise ValueError('The condition value must occur in the training data.')
     if apply_rounding and feat_types_dict is None:
         raise ValueError('apply_rounding requires feat_types_dict.')
     options = dict(params or {})
@@ -105,11 +113,17 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
     if set(options) - allowed:
         raise ValueError(f'Unknown TabFORGE parameters: {sorted(set(options) - allowed)}')
     
-    from tabforge import TabFORGEGenerator
-    
     started = perf_counter()
-    model = TabFORGEGenerator(task='unsupervision', categorical_features=categorical,
-                             random_state=int(seed), **options)
+    if cond_gen is None:
+        from tabforge import TabFORGEGenerator
+        model = TabFORGEGenerator(task='unsupervision', categorical_features=categorical,
+                                 random_state=int(seed), **options)
+    else:
+        if {'n_reference_neighbors', 'observation_masking'} & options.keys():
+            raise ValueError('Generator-only options are unsupported for conditional imputation.')
+        from tabforge import TabFORGEImputer
+        model = TabFORGEImputer(categorical_features=categorical,
+                                n_imputation_samples=1, random_state=int(seed), **options)
     model.fit(df, checkpoint=checkpoint, detokeniser=detokeniser)
     _record_time(profile, 'tabforge_fit_seconds', started)
 
@@ -125,7 +139,12 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
     results = []
     for draw in range(n_generated_dataset):
         started = perf_counter()
-        generated = model.generate(int(n_generated_sample), random_state=int(seed) + draw + 1)
+        if cond_gen is None:
+            generated = model.generate(int(n_generated_sample), random_state=int(seed) + draw + 1)
+        else:
+            query = pd.DataFrame(np.nan, index=range(n_generated_sample), columns=columns)
+            query[condition_column] = cond_gen['value']
+            generated = model.transform(query, random_state=int(seed) + draw + 1)
         _record_time(profile, 'tabforge_sampling_seconds', started)
         started = perf_counter()
         if isinstance(generated, pd.DataFrame):
@@ -135,6 +154,9 @@ def run(data, columns, target_column, time_to_event_column, n_generated_dataset,
         out = torch.tensor(np.asarray(generated, dtype=np.float32), dtype=torch.float32)
         if out.shape != (n_generated_sample, len(columns)) or not torch.isfinite(out).all():
             raise RuntimeError('TabFORGE returned an invalid shape or non-finite values.')
+        if cond_gen is not None and not bool(
+                (out[:, columns.index(condition_column)] == cond_gen['value']).all()):
+            raise RuntimeError('TabFORGE did not preserve the requested condition.')
         if apply_rounding:
             out = data_processing.round_data_gen(values, out, feat_types_dict,
                                                  rounding_plan=rounding_plan)
