@@ -501,6 +501,12 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
     """
     params = _resolve_params(params, hp_overrides)
     _validate_norm_mode(norm_mode, differential_privacy)
+    # Forward the tuned diffusion settings; omitted keys retain backend defaults.
+    diffusion_params = {
+        key: params[key]
+        for key in ("diffusion_lr", "diffusion_hidden_dim", "diffusion_batch_size")
+        if key in params
+    }
 
     set_seed(seed=seed)
     model_name = "HIVAE_inputDropout" # "HIVAE_factorized"
@@ -550,7 +556,8 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
             else:
                 est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, 
                                                                 n_generated_sample_, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, 
-                                                                diffusion_var=diffusion_var, generation_level=generation_level)
+                                                                diffusion_var=diffusion_var, generation_level=generation_level,
+                                                                diffusion_params=diffusion_params)
             est_data_gen_transformed_list.append(est_data_gen_transformed)
 
         return est_data_gen_transformed_list
@@ -559,7 +566,8 @@ def run(df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset,
             est_data_gen_transformed = generate_from_condition_HIVAE(model_hivae, df, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, condition=condition, apply_rounding=apply_rounding)
         else:
             est_data_gen_transformed = generate_from_HIVAE(model_hivae, data, miss_mask, true_miss_mask, feat_types_dict, n_generated_dataset, n_generated_sample, from_prior=gen_from_prior, diffusion=diffusion, apply_rounding=apply_rounding, 
-                                                           diffusion_var=diffusion_var, generation_level=generation_level)
+                                                           diffusion_var=diffusion_var, generation_level=generation_level,
+                                                           diffusion_params=diffusion_params)
 
         if plot:
             loss_track = {"epoch": list(range(1, len(loss_train) + 1)),
