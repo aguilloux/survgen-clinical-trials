@@ -17,12 +17,12 @@ source /home/$USER/.bashrc
 source activate hivae
 
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
-N_SAMPLES="${N_SAMPLES:-3000}"
+N_SAMPLES="${N_SAMPLES:-600}"
 N_GENERATED="${N_GENERATED:-200}"
 ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_N${N_SAMPLES}}"
 # MC_START=$((SLURM_ARRAY_TASK_ID * 50 + 1))
 MC_START=$((SLURM_ARRAY_TASK_ID))
-GENERATORS="${GENERATORS:-HI-VAE_weibull_diffusion HI-VAE_piecewise_diffusion}"
+GENERATORS="${GENERATORS:-HI-VAE_weibull_diffusion HI-VAE_piecewise_diffusion HI-VAE_weibull_prior HI-VAE_piecewise_prior}"
 read -r -a GENERATOR_LIST <<< "$GENERATORS"
 cd "$PROJECT_ROOT"
 python3 script/simulation_generate_aug_traincontrol_parallel.py \
