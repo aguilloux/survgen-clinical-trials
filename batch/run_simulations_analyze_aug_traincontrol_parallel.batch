@@ -8,7 +8,8 @@
 #SBATCH --mem=16G
 #SBATCH --partition=gpu
 
-# Override ARCHIVE_ROOT/RESULT_ROOT when analyzing another generation run.
+# Override TABPFN_ARCHIVE_ROOT/TABFORGE_ARCHIVE_ROOT and their RESULT_ROOT
+# counterparts when analyzing another generation run.
 set -eo pipefail
 module purge
 source /home/$USER/.bashrc
@@ -17,18 +18,28 @@ source activate hivae
 PROJECT_ROOT="${PROJECT_ROOT:-${SLURM_SUBMIT_DIR}/..}"
 N_SAMPLES="${N_SAMPLES:-600}"
 N_MC_PER_TASK="${N_MC_PER_TASK:-10}"
-ARCHIVE_ROOT="${ARCHIVE_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/generated_two_stage_N${N_SAMPLES}}"
-RESULT_ROOT="${RESULT_ROOT:-${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol/results_two_stage_HIVAE_N${N_SAMPLES}}"
-GENERATORS="${GENERATORS:-HI-VAE_weibull_diffusion HI-VAE_piecewise_diffusion HI-VAE_weibull_prior HI-VAE_piecewise_prior}"
-read -r -a GENERATOR_LIST <<< "$GENERATORS"
+DATASET_ROOT="${PROJECT_ROOT}/dataset/Simulations_aug_indep_traincontrol"
+TABPFN_ARCHIVE_ROOT="${TABPFN_ARCHIVE_ROOT:-${DATASET_ROOT}/generated_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+TABFORGE_ARCHIVE_ROOT="${TABFORGE_ARCHIVE_ROOT:-${DATASET_ROOT}/generated_two_stage_TabFORGE_N${N_SAMPLES}_control1of3}"
+TABPFN_RESULT_ROOT="${TABPFN_RESULT_ROOT:-${DATASET_ROOT}/results_two_stage_TabPFN_N${N_SAMPLES}_control1of3}"
+TABFORGE_RESULT_ROOT="${TABFORGE_RESULT_ROOT:-${DATASET_ROOT}/results_two_stage_TabFORGE_N${N_SAMPLES}_control1of3}"
 MC_START=$((SLURM_ARRAY_TASK_ID * N_MC_PER_TASK + 1))
 MC_END=$((MC_START + N_MC_PER_TASK - 1))
 
 cd "$PROJECT_ROOT"
-echo "Analyzing MC ${MC_START}-${MC_END} from ${ARCHIVE_ROOT}"
-python3 script/simulation_analyze_aug_traincontrol_parallel.py \
-  --mc-start "$MC_START" \
-  --n-mc "$N_MC_PER_TASK" \
-  --input-dir "$ARCHIVE_ROOT" \
-  --output "${RESULT_ROOT}/results_MC_${MC_START}to${MC_END}.csv" \
-  --generators "${GENERATOR_LIST[@]}"
+for model in TabPFN TabFORGE; do
+  if [[ "$model" == TabPFN ]]; then
+    archive_root="$TABPFN_ARCHIVE_ROOT"
+    result_root="$TABPFN_RESULT_ROOT"
+  else
+    archive_root="$TABFORGE_ARCHIVE_ROOT"
+    result_root="$TABFORGE_RESULT_ROOT"
+  fi
+  echo "Analyzing ${model} MC ${MC_START}-${MC_END} from ${archive_root}"
+  python3 script/simulation_analyze_aug_traincontrol_parallel.py \
+    --mc-start "$MC_START" \
+    --n-mc "$N_MC_PER_TASK" \
+    --input-dir "$archive_root" \
+    --output "${result_root}/results_MC_${MC_START}to${MC_END}.csv" \
+    --generators "${model}-naive"
+done
